@@ -1,0 +1,12 @@
+.env
+.env.local
+
+# Node / Next.js
+node_modules/
+.next/
+.pnpm-store/
+
+# Python / FastAPI
+__pycache__/
+*.pyc
+.venv/
