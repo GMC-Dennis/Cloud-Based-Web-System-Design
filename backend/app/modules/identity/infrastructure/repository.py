@@ -91,6 +91,14 @@ class SqlUserRepository:
     async def reactivate(self, user_id: str) -> None:
         await self.session.execute(update(UserModel).where(UserModel.id == uuid.UUID(user_id)).values(deleted_at=None))
 
+    async def get_full_names_by_ids(self, user_ids: list[str]) -> dict[str, str]:
+        if not user_ids:
+            return {}
+        rows = await self.session.execute(
+            select(UserModel.id, UserModel.full_name).where(UserModel.id.in_(uuid.UUID(u) for u in user_ids))
+        )
+        return {str(row.id): row.full_name for row in rows}
+
 
 class SqlOtpChallengeRepository:
     def __init__(self, session: AsyncSession):
