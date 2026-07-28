@@ -1,0 +1,56 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+
+import { apiClient } from "@/lib/api-client";
+import type { ChamaGroup, ChamaMember, Contribution } from "@/features/chama-portal/types";
+
+export function useMyChamas() {
+  return useQuery({
+    queryKey: ["chama", "groups"],
+    queryFn: async () => (await apiClient.get<ChamaGroup[]>("/chama/groups")).data,
+  });
+}
+
+export function useChamaMembers(chamaId: string | null) {
+  return useQuery({
+    queryKey: ["chama", "members", chamaId],
+    queryFn: async () => (await apiClient.get<ChamaMember[]>(`/chama/groups/${chamaId}/members`)).data,
+    enabled: !!chamaId,
+  });
+}
+
+export function usePunctuality(memberId: string | null) {
+  return useQuery({
+    queryKey: ["chama", "punctuality", memberId],
+    queryFn: async () => (await apiClient.get<{ member_id: string; punctuality_pct: number }>(`/chama/members/${memberId}/punctuality`)).data,
+    enabled: !!memberId,
+  });
+}
+
+export function useCreateChama() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { group_name: string; contribution_cycle: string; cycle_amount: string }) =>
+      (await apiClient.post<ChamaGroup>("/chama/groups", input)).data,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["chama", "groups"] }),
+  });
+}
+
+export function useAddMember(chamaId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { user_id: string; member_role?: string }) =>
+      (await apiClient.post<ChamaMember>(`/chama/groups/${chamaId}/members`, input)).data,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["chama", "members", chamaId] }),
+  });
+}
+
+export function useRecordContribution() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { member_id: string; cycle_due_date: string; amount_due: string; amount_paid: string }) =>
+      (await apiClient.post<Contribution>("/chama/contributions", input)).data,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["chama", "punctuality"] });
+    },
+  });
+}
