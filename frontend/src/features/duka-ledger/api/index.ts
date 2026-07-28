@@ -23,13 +23,23 @@ export function useProducts() {
 export function useRecordSale() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { amount: string; currency?: string; is_credit?: boolean; customer_phone?: string }) =>
+    mutationFn: async (input: {
+      amount: string;
+      currency?: string;
+      is_credit?: boolean;
+      customer_phone?: string;
+      // Required by the backend -- a sale must reference at least one real
+      // product so revenue is tied to an actual inventory movement.
+      line_items: { product_id: string; quantity: number }[];
+    }) =>
       (
         await apiClient.post<Transaction>("/ledger/transactions/sale", input, {
           headers: { "Idempotency-Key": newIdempotencyKey() },
         })
       ).data,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["ledger", "transactions"] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["ledger", "transactions"], exact: false }).then(() =>
+      queryClient.invalidateQueries({ queryKey: ["ledger", "products"] }),
+    ),
   });
 }
 

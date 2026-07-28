@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { href: "/ledger", label: "Duka Ledger", roles: ["MERCHANT"] },
   { href: "/chama", label: "Chama Portal", roles: ["MERCHANT", "CHAMA_MEMBER"] },
   { href: "/underwriting", label: "Underwriting", roles: ["UNDERWRITER"] },
+  { href: "/admin", label: "Admin", roles: ["ADMIN"] },
 ];
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {

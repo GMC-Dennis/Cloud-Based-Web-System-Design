@@ -18,6 +18,7 @@ export function ChamaDetail({ chamaId }: { chamaId: string }) {
   const [dueDate, setDueDate] = useState("");
   const [amountDue, setAmountDue] = useState("");
   const [amountPaid, setAmountPaid] = useState("");
+  const [contributionError, setContributionError] = useState<string | null>(null);
 
   const { data: punctuality } = usePunctuality(selectedMemberId);
 
@@ -72,15 +73,26 @@ export function ChamaDetail({ chamaId }: { chamaId: string }) {
             <Button
               disabled={recordContribution.isPending || !dueDate || !amountDue || !amountPaid}
               onClick={async () => {
-                await recordContribution.mutateAsync({ member_id: selectedMemberId, cycle_due_date: dueDate, amount_due: amountDue, amount_paid: amountPaid });
-                setDueDate("");
-                setAmountDue("");
-                setAmountPaid("");
+                setContributionError(null);
+                try {
+                  await recordContribution.mutateAsync({ member_id: selectedMemberId, cycle_due_date: dueDate, amount_due: amountDue, amount_paid: amountPaid });
+                  setDueDate("");
+                  setAmountDue("");
+                  setAmountPaid("");
+                } catch (err: unknown) {
+                  const status = (err as { response?: { status?: number } }).response?.status;
+                  setContributionError(
+                    status === 403
+                      ? "Only this chama's chairperson, treasurer, or secretary can record a contribution -- and not for their own."
+                      : "Could not record the contribution.",
+                  );
+                }
               }}
             >
               Record
             </Button>
           </div>
+          {contributionError && <p className="text-sm text-red-600">{contributionError}</p>}
         </div>
       )}
     </div>

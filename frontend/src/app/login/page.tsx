@@ -7,11 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { requestOtp, verifyOtp } from "@/lib/auth-api";
-import { saveSession } from "@/lib/auth";
+import { landingPageForRole, saveSession } from "@/lib/auth";
 
 type Step = "phone" | "otp";
 
-const ROLES = ["MERCHANT", "CHAMA_MEMBER", "UNDERWRITER"] as const;
+// UNDERWRITER/ADMIN are deliberately excluded -- those accounts must be
+// provisioned by an existing admin (see /admin), not self-assigned here.
+// The backend enforces this independently of what this list offers.
+const ROLES = ["MERCHANT", "CHAMA_MEMBER"] as const;
 
 export default function LoginPage() {
   const router = useRouter();
@@ -53,12 +56,14 @@ export default function LoginPage() {
         userId: result.user_id,
         role: result.role,
       });
-      router.push("/ledger");
+      router.push(landingPageForRole(result.role));
     } catch (err: unknown) {
       const status = (err as { response?: { status?: number } }).response?.status;
       if (status === 404) {
         setNeedsRegistration(true);
         setError("First time here -- tell us your name and role to finish signing up.");
+      } else if (status === 403) {
+        setError("This account has been deactivated. Contact an administrator.");
       } else {
         setError("Incorrect or expired code.");
       }

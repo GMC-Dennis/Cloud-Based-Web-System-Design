@@ -62,3 +62,16 @@ export function clearSession(): void {
 export function isAuthenticated(): boolean {
   return getAccessToken() !== null;
 }
+
+export function landingPageForRole(role: string): string {
+  switch (role) {
+    case "ADMIN":
+      return "/admin";
+    case "UNDERWRITER":
+      return "/underwriting";
+    case "CHAMA_MEMBER":
+      return "/chama";
+    default:
+      return "/ledger";
+  }
+}
