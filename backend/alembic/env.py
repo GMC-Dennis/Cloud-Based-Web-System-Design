@@ -14,6 +14,7 @@ from app.modules.identity.infrastructure import models as identity_models  # noq
 from app.modules.ledger.infrastructure import models as ledger_models  # noqa: F401
 from app.modules.chama.infrastructure import models as chama_models  # noqa: F401
 from app.modules.scoring.infrastructure import models as scoring_models  # noqa: F401
+from app.core import idempotency as idempotency_models  # noqa: F401
 
 config = context.config
 

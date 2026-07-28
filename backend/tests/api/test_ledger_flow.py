@@ -21,7 +21,9 @@ async def test_recording_sales_builds_the_hash_chain(client, sent_otps):
 
     listing = await client.get("/ledger/transactions", headers=headers)
     assert listing.status_code == 200
-    assert len(listing.json()) == 2
+    body = listing.json()
+    assert body["total"] == 2
+    assert len(body["items"]) == 2
 
 
 async def test_product_and_restock_flow(client, sent_otps):
@@ -37,4 +39,6 @@ async def test_product_and_restock_flow(client, sent_otps):
     assert restock.status_code == 204
 
     products = await client.get("/ledger/products", headers=headers)
-    assert products.json()[0]["quantity_on_hand"] == 24
+    body = products.json()
+    assert body["total"] == 1
+    assert body["items"][0]["quantity_on_hand"] == 24

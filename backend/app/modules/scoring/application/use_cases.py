@@ -126,5 +126,5 @@ class ListApplicants:
     def __init__(self, loan_repo: LoanRepository):
         self.loan_repo = loan_repo
 
-    async def execute(self) -> list[ApplicantView]:
-        return await self.loan_repo.list_applicants()
+    async def execute(self, limit: int, offset: int) -> tuple[list[ApplicantView], int]:
+        return await self.loan_repo.list_applicants(limit, offset)

@@ -86,16 +86,22 @@ class SqlLedgerRepository:
         await self.session.refresh(row)
         return _to_domain_txn(row)
 
-    async def list_for_merchant(self, merchant_id: str, limit: int = 100) -> list[DukaTransaction]:
+    async def list_for_merchant(self, merchant_id: str, limit: int, offset: int) -> tuple[list[DukaTransaction], int]:
+        total = (
+            await self.session.execute(
+                select(func.count()).select_from(TxnModel).where(TxnModel.merchant_id == uuid.UUID(merchant_id))
+            )
+        ).scalar_one()
         rows = (
             await self.session.execute(
                 select(TxnModel)
                 .where(TxnModel.merchant_id == uuid.UUID(merchant_id))
                 .order_by(TxnModel.created_at.desc())
                 .limit(limit)
+                .offset(offset)
             )
         ).scalars()
-        return [_to_domain_txn(r) for r in rows]
+        return [_to_domain_txn(r) for r in rows], total
 
     async def sales_total_since(self, merchant_id: str, since: datetime) -> Decimal:
         result = await self.session.execute(
@@ -165,11 +171,22 @@ class SqlProductRepository:
         row = await self.session.get(ProductModel, uuid.UUID(product_id))
         return _to_domain_product(row) if row else None
 
-    async def list_for_merchant(self, merchant_id: str) -> list[Product]:
+    async def list_for_merchant(self, merchant_id: str, limit: int, offset: int) -> tuple[list[Product], int]:
+        total = (
+            await self.session.execute(
+                select(func.count()).select_from(ProductModel).where(ProductModel.merchant_id == uuid.UUID(merchant_id))
+            )
+        ).scalar_one()
         rows = (
-            await self.session.execute(select(ProductModel).where(ProductModel.merchant_id == uuid.UUID(merchant_id)))
+            await self.session.execute(
+                select(ProductModel)
+                .where(ProductModel.merchant_id == uuid.UUID(merchant_id))
+                .order_by(ProductModel.updated_at.desc(), ProductModel.id)
+                .limit(limit)
+                .offset(offset)
+            )
         ).scalars()
-        return [_to_domain_product(r) for r in rows]
+        return [_to_domain_product(r) for r in rows], total
 
     async def margin_stability(self, merchant_id: str) -> float:
         result = await self.session.execute(

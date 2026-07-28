@@ -2,7 +2,7 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.scoring.domain.entities import ApplicantView, CreditScore, Loan, LoanRepayment
@@ -88,9 +88,20 @@ class SqlLoanRepository:
         row = await self.session.get(LoanModel, uuid.UUID(loan_id))
         return _to_loan(row) if row else None
 
-    async def list_for_borrower(self, borrower_id: str) -> list[Loan]:
-        rows = (await self.session.execute(select(LoanModel).where(LoanModel.borrower_id == uuid.UUID(borrower_id)))).scalars()
-        return [_to_loan(r) for r in rows]
+    async def list_for_borrower(self, borrower_id: str, limit: int, offset: int) -> tuple[list[Loan], int]:
+        total = (
+            await self.session.execute(select(func.count()).select_from(LoanModel).where(LoanModel.borrower_id == uuid.UUID(borrower_id)))
+        ).scalar_one()
+        rows = (
+            await self.session.execute(
+                select(LoanModel)
+                .where(LoanModel.borrower_id == uuid.UUID(borrower_id))
+                .order_by(LoanModel.created_at.desc(), LoanModel.id)
+                .limit(limit)
+                .offset(offset)
+            )
+        ).scalars()
+        return [_to_loan(r) for r in rows], total
 
     async def record_repayment(self, loan_id: str, amount: Decimal) -> LoanRepayment:
         row = RepaymentModel(loan_id=uuid.UUID(loan_id), amount=amount)
@@ -99,11 +110,15 @@ class SqlLoanRepository:
         await self.session.refresh(row)
         return LoanRepayment(id=str(row.id), loan_id=str(row.loan_id), amount=row.amount, paid_at=row.paid_at)
 
-    async def list_applicants(self) -> list[ApplicantView]:
+    async def list_applicants(self, limit: int, offset: int) -> tuple[list[ApplicantView], int]:
         # Reads the anonymized underwriter_applicant_view (TDD §4) -- never
         # the base tables -- so applicant identity stays masked pre-approval.
-        rows = await self.session.execute(text("SELECT * FROM underwriter_applicant_view"))
-        return [
+        total = (await self.session.execute(text("SELECT COUNT(*) FROM underwriter_applicant_view"))).scalar_one()
+        rows = await self.session.execute(
+            text("SELECT * FROM underwriter_applicant_view ORDER BY credit_score_id LIMIT :limit OFFSET :offset"),
+            {"limit": limit, "offset": offset},
+        )
+        applicants = [
             ApplicantView(
                 credit_score_id=str(r.credit_score_id),
                 loan_id=str(r.loan_id) if r.loan_id else None,
@@ -117,3 +132,4 @@ class SqlLoanRepository:
             )
             for r in rows
         ]
+        return applicants, total

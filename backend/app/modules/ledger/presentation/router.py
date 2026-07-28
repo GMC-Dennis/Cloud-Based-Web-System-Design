@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import get_redis
 from app.core.db import get_db
 from app.core.deps import CurrentUser, get_current_user
+from app.core.idempotency import idempotent
+from app.core.pagination import Page, PageParams
 from app.modules.ledger.application.use_cases import (
     CreateProduct,
     ListProducts,
@@ -33,42 +35,69 @@ router = APIRouter(prefix="/ledger", tags=["ledger"])
 
 
 @router.post("/transactions/sale", response_model=TransactionOut)
-async def record_sale(body: RecordSaleIn, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)) -> TransactionOut:
-    use_case = RecordSale(SqlLedgerRepository(db), SqlInventoryRepository(db), get_redis())
-    txn = await use_case.execute(
-        merchant_id=user.id,
-        amount=body.amount,
-        currency=body.currency,
-        is_credit=body.is_credit,
-        customer_phone=body.customer_phone,
-        line_items=[SaleLineItem(product_id=li.product_id, quantity=li.quantity) for li in body.line_items],
-    )
+async def record_sale(
+    body: RecordSaleIn,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> TransactionOut:
+    async def execute() -> dict:
+        use_case = RecordSale(SqlLedgerRepository(db), SqlInventoryRepository(db), get_redis())
+        txn = await use_case.execute(
+            merchant_id=user.id,
+            amount=body.amount,
+            currency=body.currency,
+            is_credit=body.is_credit,
+            customer_phone=body.customer_phone,
+            line_items=[SaleLineItem(product_id=li.product_id, quantity=li.quantity) for li in body.line_items],
+        )
+        return TransactionOut(**txn.__dict__).model_dump(mode="json")
+
+    result = await idempotent(db, user_id=user.id, idempotency_key=idempotency_key, endpoint="ledger.record_sale", execute=execute)
     await db.commit()
-    return TransactionOut(**txn.__dict__)
+    return TransactionOut(**result)
 
 
 @router.post("/transactions/expense", response_model=TransactionOut)
-async def record_expense(body: RecordExpenseIn, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)) -> TransactionOut:
-    txn = await RecordExpense(SqlLedgerRepository(db), get_redis()).execute(merchant_id=user.id, amount=body.amount, currency=body.currency)
+async def record_expense(
+    body: RecordExpenseIn,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> TransactionOut:
+    async def execute() -> dict:
+        txn = await RecordExpense(SqlLedgerRepository(db), get_redis()).execute(merchant_id=user.id, amount=body.amount, currency=body.currency)
+        return TransactionOut(**txn.__dict__).model_dump(mode="json")
+
+    result = await idempotent(db, user_id=user.id, idempotency_key=idempotency_key, endpoint="ledger.record_expense", execute=execute)
     await db.commit()
-    return TransactionOut(**txn.__dict__)
+    return TransactionOut(**result)
 
 
 @router.post("/transactions/supplier-payment", response_model=TransactionOut)
 async def record_supplier_payment(
-    body: RecordSupplierPaymentIn, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)
+    body: RecordSupplierPaymentIn,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> TransactionOut:
-    txn = await RecordSupplierPayment(SqlLedgerRepository(db), get_redis()).execute(
-        merchant_id=user.id, amount=body.amount, currency=body.currency
-    )
+    async def execute() -> dict:
+        txn = await RecordSupplierPayment(SqlLedgerRepository(db), get_redis()).execute(
+            merchant_id=user.id, amount=body.amount, currency=body.currency
+        )
+        return TransactionOut(**txn.__dict__).model_dump(mode="json")
+
+    result = await idempotent(db, user_id=user.id, idempotency_key=idempotency_key, endpoint="ledger.record_supplier_payment", execute=execute)
     await db.commit()
-    return TransactionOut(**txn.__dict__)
+    return TransactionOut(**result)
 
 
-@router.get("/transactions", response_model=list[TransactionOut])
-async def list_transactions(db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)) -> list[TransactionOut]:
-    txns = await ListTransactions(SqlLedgerRepository(db)).execute(user.id)
-    return [TransactionOut(**t.__dict__) for t in txns]
+@router.get("/transactions", response_model=Page[TransactionOut])
+async def list_transactions(
+    db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user), page: PageParams = Depends()
+) -> Page[TransactionOut]:
+    txns, total = await ListTransactions(SqlLedgerRepository(db)).execute(user.id, page.limit, page.offset)
+    return Page(items=[TransactionOut(**t.__dict__) for t in txns], total=total, limit=page.limit, offset=page.offset)
 
 
 @router.post("/products", response_model=ProductOut)
@@ -80,10 +109,12 @@ async def create_product(body: CreateProductIn, db: AsyncSession = Depends(get_d
     return ProductOut(**product.__dict__)
 
 
-@router.get("/products", response_model=list[ProductOut])
-async def list_products(db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)) -> list[ProductOut]:
-    products = await ListProducts(SqlProductRepository(db)).execute(user.id)
-    return [ProductOut(**p.__dict__) for p in products]
+@router.get("/products", response_model=Page[ProductOut])
+async def list_products(
+    db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user), page: PageParams = Depends()
+) -> Page[ProductOut]:
+    products, total = await ListProducts(SqlProductRepository(db)).execute(user.id, page.limit, page.offset)
+    return Page(items=[ProductOut(**p.__dict__) for p in products], total=total, limit=page.limit, offset=page.offset)
 
 
 @router.post("/products/{product_id}/restock", response_model=None, status_code=204)

@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.cache import get_redis
 from app.core.db import get_db
 from app.core.deps import CurrentUser, get_current_user
+from app.core.pagination import Page, PageParams
 from app.modules.chama.application.use_cases import (
     AddMember,
     CreateChama,
@@ -43,10 +44,12 @@ async def create_chama(body: CreateChamaIn, db: AsyncSession = Depends(get_db), 
     return ChamaGroupOut(**group.__dict__)
 
 
-@router.get("/groups", response_model=list[ChamaGroupOut])
-async def list_my_chamas(db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)) -> list[ChamaGroupOut]:
-    groups = await ListMyChamas(SqlChamaGroupRepository(db)).execute(user.id)
-    return [ChamaGroupOut(**g.__dict__) for g in groups]
+@router.get("/groups", response_model=Page[ChamaGroupOut])
+async def list_my_chamas(
+    db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user), page: PageParams = Depends()
+) -> Page[ChamaGroupOut]:
+    groups, total = await ListMyChamas(SqlChamaGroupRepository(db)).execute(user.id, page.limit, page.offset)
+    return Page(items=[ChamaGroupOut(**g.__dict__) for g in groups], total=total, limit=page.limit, offset=page.offset)
 
 
 @router.post("/groups/{chama_id}/members", response_model=ChamaMemberOut)
@@ -56,10 +59,12 @@ async def add_member(chama_id: str, body: AddMemberIn, db: AsyncSession = Depend
     return ChamaMemberOut(**member.__dict__)
 
 
-@router.get("/groups/{chama_id}/members", response_model=list[ChamaMemberOut])
-async def list_members(chama_id: str, db: AsyncSession = Depends(get_db), _: CurrentUser = Depends(get_current_user)) -> list[ChamaMemberOut]:
-    members = await ListMembers(SqlChamaMemberRepository(db)).execute(chama_id)
-    return [ChamaMemberOut(**m.__dict__) for m in members]
+@router.get("/groups/{chama_id}/members", response_model=Page[ChamaMemberOut])
+async def list_members(
+    chama_id: str, db: AsyncSession = Depends(get_db), _: CurrentUser = Depends(get_current_user), page: PageParams = Depends()
+) -> Page[ChamaMemberOut]:
+    members, total = await ListMembers(SqlChamaMemberRepository(db)).execute(chama_id, page.limit, page.offset)
+    return Page(items=[ChamaMemberOut(**m.__dict__) for m in members], total=total, limit=page.limit, offset=page.offset)
 
 
 @router.post("/contributions", response_model=ContributionOut)

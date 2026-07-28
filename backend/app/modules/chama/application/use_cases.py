@@ -70,13 +70,13 @@ class ListMyChamas:
     def __init__(self, group_repo: ChamaGroupRepository):
         self.group_repo = group_repo
 
-    async def execute(self, user_id: str) -> list[ChamaGroup]:
-        return await self.group_repo.list_for_user(user_id)
+    async def execute(self, user_id: str, limit: int, offset: int) -> tuple[list[ChamaGroup], int]:
+        return await self.group_repo.list_for_user(user_id, limit, offset)
 
 
 class ListMembers:
     def __init__(self, member_repo: ChamaMemberRepository):
         self.member_repo = member_repo
 
-    async def execute(self, chama_id: str) -> list[ChamaMember]:
-        return await self.member_repo.list_for_chama(chama_id)
+    async def execute(self, chama_id: str, limit: int, offset: int) -> tuple[list[ChamaMember], int]:
+        return await self.member_repo.list_for_chama(chama_id, limit, offset)

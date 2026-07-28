@@ -49,13 +49,11 @@ class SqlChamaGroupRepository:
         row = await self.session.get(GroupModel, uuid.UUID(chama_id))
         return _to_group(row) if row else None
 
-    async def list_for_user(self, user_id: str) -> list[ChamaGroup]:
-        rows = (
-            await self.session.execute(
-                select(GroupModel).join(MemberModel, MemberModel.chama_id == GroupModel.id).where(MemberModel.user_id == uuid.UUID(user_id))
-            )
-        ).scalars()
-        return [_to_group(r) for r in rows]
+    async def list_for_user(self, user_id: str, limit: int, offset: int) -> tuple[list[ChamaGroup], int]:
+        base = select(GroupModel).join(MemberModel, MemberModel.chama_id == GroupModel.id).where(MemberModel.user_id == uuid.UUID(user_id))
+        total = (await self.session.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
+        rows = (await self.session.execute(base.order_by(GroupModel.created_at.desc(), GroupModel.id).limit(limit).offset(offset))).scalars()
+        return [_to_group(r) for r in rows], total
 
 
 class SqlChamaMemberRepository:
@@ -81,9 +79,20 @@ class SqlChamaMemberRepository:
         ).scalar_one_or_none()
         return _to_member(row) if row else None
 
-    async def list_for_chama(self, chama_id: str) -> list[ChamaMember]:
-        rows = (await self.session.execute(select(MemberModel).where(MemberModel.chama_id == uuid.UUID(chama_id)))).scalars()
-        return [_to_member(r) for r in rows]
+    async def list_for_chama(self, chama_id: str, limit: int, offset: int) -> tuple[list[ChamaMember], int]:
+        total = (
+            await self.session.execute(select(func.count()).select_from(MemberModel).where(MemberModel.chama_id == uuid.UUID(chama_id)))
+        ).scalar_one()
+        rows = (
+            await self.session.execute(
+                select(MemberModel)
+                .where(MemberModel.chama_id == uuid.UUID(chama_id))
+                .order_by(MemberModel.joined_at.desc(), MemberModel.id)
+                .limit(limit)
+                .offset(offset)
+            )
+        ).scalars()
+        return [_to_member(r) for r in rows], total
 
     async def list_for_user(self, user_id: str) -> list[ChamaMember]:
         rows = (await self.session.execute(select(MemberModel).where(MemberModel.user_id == uuid.UUID(user_id)))).scalars()

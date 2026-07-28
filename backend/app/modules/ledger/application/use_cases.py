@@ -126,13 +126,13 @@ class ListTransactions:
     def __init__(self, ledger_repo: LedgerRepository):
         self.ledger_repo = ledger_repo
 
-    async def execute(self, merchant_id: str, limit: int = 100) -> list[DukaTransaction]:
-        return await self.ledger_repo.list_for_merchant(merchant_id, limit)
+    async def execute(self, merchant_id: str, limit: int, offset: int) -> tuple[list[DukaTransaction], int]:
+        return await self.ledger_repo.list_for_merchant(merchant_id, limit, offset)
 
 
 class ListProducts:
     def __init__(self, product_repo: ProductRepository):
         self.product_repo = product_repo
 
-    async def execute(self, merchant_id: str) -> list[Product]:
-        return await self.product_repo.list_for_merchant(merchant_id)
+    async def execute(self, merchant_id: str, limit: int, offset: int) -> tuple[list[Product], int]:
+        return await self.product_repo.list_for_merchant(merchant_id, limit, offset)

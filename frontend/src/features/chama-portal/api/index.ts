@@ -1,19 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiClient } from "@/lib/api-client";
+import type { Page } from "@/lib/pagination";
 import type { ChamaGroup, ChamaMember, Contribution } from "@/features/chama-portal/types";
 
 export function useMyChamas() {
   return useQuery({
     queryKey: ["chama", "groups"],
-    queryFn: async () => (await apiClient.get<ChamaGroup[]>("/chama/groups")).data,
+    queryFn: async () => (await apiClient.get<Page<ChamaGroup>>("/chama/groups", { params: { limit: 200 } })).data.items,
   });
 }
 
 export function useChamaMembers(chamaId: string | null) {
   return useQuery({
     queryKey: ["chama", "members", chamaId],
-    queryFn: async () => (await apiClient.get<ChamaMember[]>(`/chama/groups/${chamaId}/members`)).data,
+    queryFn: async () => (await apiClient.get<Page<ChamaMember>>(`/chama/groups/${chamaId}/members`, { params: { limit: 200 } })).data.items,
     enabled: !!chamaId,
   });
 }

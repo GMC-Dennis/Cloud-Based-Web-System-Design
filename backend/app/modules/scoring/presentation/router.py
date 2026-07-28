@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db
 from app.core.deps import CurrentUser, get_current_user, require_role
+from app.core.pagination import Page, PageParams
 from app.modules.chama.infrastructure.repository import SqlChamaContributionRepository, SqlChamaMemberRepository
 from app.modules.ledger.infrastructure.repository import SqlLedgerRepository, SqlProductRepository
 from app.modules.scoring.application.use_cases import (
@@ -89,10 +90,12 @@ async def create_loan(body: CreateLoanIn, db: AsyncSession = Depends(get_db)) ->
     return LoanOut(**loan.__dict__)
 
 
-@router.get("/loans/mine", response_model=list[LoanOut])
-async def my_loans(db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)) -> list[LoanOut]:
-    loans = await SqlLoanRepository(db).list_for_borrower(user.id)
-    return [LoanOut(**l.__dict__) for l in loans]
+@router.get("/loans/mine", response_model=Page[LoanOut])
+async def my_loans(
+    db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user), page: PageParams = Depends()
+) -> Page[LoanOut]:
+    loans, total = await SqlLoanRepository(db).list_for_borrower(user.id, page.limit, page.offset)
+    return Page(items=[LoanOut(**l.__dict__) for l in loans], total=total, limit=page.limit, offset=page.offset)
 
 
 @router.post("/loans/{loan_id}/repayments", response_model=RepaymentOut)
@@ -102,7 +105,7 @@ async def record_repayment(loan_id: str, body: RecordRepaymentIn, db: AsyncSessi
     return RepaymentOut(**repayment.__dict__)
 
 
-@router.get("/underwriter/applicants", response_model=list[ApplicantOut], dependencies=[Depends(require_role("UNDERWRITER"))])
-async def list_applicants(db: AsyncSession = Depends(get_db)) -> list[ApplicantOut]:
-    applicants = await ListApplicants(SqlLoanRepository(db)).execute()
-    return [ApplicantOut(**a.__dict__) for a in applicants]
+@router.get("/underwriter/applicants", response_model=Page[ApplicantOut], dependencies=[Depends(require_role("UNDERWRITER"))])
+async def list_applicants(db: AsyncSession = Depends(get_db), page: PageParams = Depends()) -> Page[ApplicantOut]:
+    applicants, total = await ListApplicants(SqlLoanRepository(db)).execute(page.limit, page.offset)
+    return Page(items=[ApplicantOut(**a.__dict__) for a in applicants], total=total, limit=page.limit, offset=page.offset)

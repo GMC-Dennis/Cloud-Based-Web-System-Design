@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiClient } from "@/lib/api-client";
+import type { Page } from "@/lib/pagination";
 import type { Applicant, CreditScore, Loan } from "@/features/credit-scoring/types";
 
 export function useLatestScore(userId: string | null) {
@@ -20,17 +21,18 @@ export function useEvaluateMerchant() {
   });
 }
 
-export function useApplicants() {
+export function useApplicants(params: { limit?: number; offset?: number } = {}) {
+  const { limit = 50, offset = 0 } = params;
   return useQuery({
-    queryKey: ["scoring", "applicants"],
-    queryFn: async () => (await apiClient.get<Applicant[]>("/underwriter/applicants")).data,
+    queryKey: ["scoring", "applicants", limit, offset],
+    queryFn: async () => (await apiClient.get<Page<Applicant>>("/underwriter/applicants", { params: { limit, offset } })).data,
   });
 }
 
 export function useMyLoans() {
   return useQuery({
     queryKey: ["scoring", "loans", "mine"],
-    queryFn: async () => (await apiClient.get<Loan[]>("/loans/mine")).data,
+    queryFn: async () => (await apiClient.get<Page<Loan>>("/loans/mine", { params: { limit: 200 } })).data.items,
   });
 }
 
