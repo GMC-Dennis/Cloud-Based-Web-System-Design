@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiClient } from "@/lib/api-client";
 import type { Page } from "@/lib/pagination";
-import type { Applicant, CreditScore, Loan, Repayment } from "@/features/credit-scoring/types";
+import type { Applicant, BorrowerSearchResult, CreditScore, Loan, Repayment } from "@/features/credit-scoring/types";
 
 export function useLatestScore(userId: string | null) {
   return useQuery({
@@ -44,6 +44,15 @@ export function useLoanRepayments(loanId: string) {
   });
 }
 
+export function useRecordRepayment() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ loanId, amount }: { loanId: string; amount: string }) =>
+      (await apiClient.post<Repayment>(`/loans/${loanId}/repayments`, { amount })).data,
+    onSuccess: (_data, { loanId }) => queryClient.invalidateQueries({ queryKey: ["scoring", "loans", loanId, "repayments"] }),
+  });
+}
+
 export function useCreateLoan() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -51,13 +60,26 @@ export function useCreateLoan() {
       // borrower_id is intentionally omittable: for ALGORITHMIC loans the
       // backend resolves the borrower from credit_score_id server-side, since
       // the anonymized underwriter_applicant_view never hands the browser a
-      // raw user_id (see backend CreateLoanIn's docstring).
+      // raw user_id (see backend CreateLoanIn's docstring). MANUAL/OVERRIDE
+      // loans have no score to resolve a borrower from, so they must supply
+      // borrower_id (from the borrower-search flow) and override_reason directly.
       borrower_id?: string;
       underwriting_method?: string;
       credit_score_id?: string;
+      override_reason?: string;
       principal: string;
       interest_rate: string;
+      due_date?: string;
     }) => (await apiClient.post<Loan>("/loans", input)).data,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["scoring", "applicants"] }),
+  });
+}
+
+export function useBorrowerSearch(phone: string) {
+  return useQuery({
+    queryKey: ["identity", "underwriter", "borrower-search", phone],
+    queryFn: async () =>
+      (await apiClient.get<Page<BorrowerSearchResult>>("/underwriter/users/search", { params: { phone, limit: 20 } })).data.items,
+    enabled: phone.length >= 3,
   });
 }

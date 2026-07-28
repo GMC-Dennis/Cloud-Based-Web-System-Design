@@ -4,7 +4,13 @@ from decimal import Decimal
 from redis.asyncio import Redis
 
 from app.core.cache import invalidate_score_cache
-from app.modules.chama.application.exceptions import CannotRecordOwnContribution, NotAuthorizedToRecordContribution
+from app.modules.chama.application.exceptions import (
+    CannotRecordOwnContribution,
+    MemberNotFound,
+    NotAMemberOfThisChama,
+    NotAuthorizedToRecordContribution,
+    NotAuthorizedToSchedulePayout,
+)
 from app.modules.chama.domain.entities import ChamaContribution, ChamaGroup, ChamaMember, ChamaPayout
 from app.modules.chama.domain.repository import (
     ChamaContributionRepository,
@@ -73,10 +79,19 @@ class RecordContribution:
 
 
 class SchedulePayout:
-    def __init__(self, payout_repo: ChamaPayoutRepository):
+    def __init__(self, payout_repo: ChamaPayoutRepository, member_repo: ChamaMemberRepository):
         self.payout_repo = payout_repo
+        self.member_repo = member_repo
 
-    async def execute(self, *, chama_id: str, recipient_member_id: str, payout_amount: Decimal, scheduled_date: date) -> ChamaPayout:
+    async def execute(
+        self, *, chama_id: str, recipient_member_id: str, payout_amount: Decimal, scheduled_date: date, scheduled_by_user_id: str
+    ) -> ChamaPayout:
+        # Same duty-separation precedent as RecordContribution: scheduling a
+        # payout is a sensitive, officer-only action, not something any
+        # authenticated user should be able to do for any chama.
+        acting_membership = await self.member_repo.get_for_user(chama_id, scheduled_by_user_id)
+        if acting_membership is None or acting_membership.member_role not in OFFICER_ROLES:
+            raise NotAuthorizedToSchedulePayout("Only a chairperson, treasurer, or secretary of this chama can schedule a payout")
         return await self.payout_repo.schedule(chama_id=chama_id, recipient_member_id=recipient_member_id, payout_amount=payout_amount, scheduled_date=scheduled_date)
 
 
@@ -102,3 +117,35 @@ class ListMembers:
 
     async def execute(self, chama_id: str, limit: int, offset: int) -> tuple[list[ChamaMember], int]:
         return await self.member_repo.list_for_chama(chama_id, limit, offset)
+
+
+class ListContributions:
+    """Viewing a member's contribution history is not the sensitive action
+    (recording one is) -- any member of the *same* chama can view it, not
+    just officers. Still gated on chama membership so an unrelated
+    authenticated user can't browse a chama they don't belong to."""
+
+    def __init__(self, contribution_repo: ChamaContributionRepository, member_repo: ChamaMemberRepository):
+        self.contribution_repo = contribution_repo
+        self.member_repo = member_repo
+
+    async def execute(self, *, member_id: str, requesting_user_id: str, limit: int, offset: int) -> tuple[list[ChamaContribution], int]:
+        target_member = await self.member_repo.get(member_id)
+        if target_member is None:
+            raise MemberNotFound(member_id)
+        requester_membership = await self.member_repo.get_for_user(target_member.chama_id, requesting_user_id)
+        if requester_membership is None:
+            raise NotAMemberOfThisChama(target_member.chama_id)
+        return await self.contribution_repo.list_for_member(member_id, limit, offset)
+
+
+class ListPayouts:
+    def __init__(self, payout_repo: ChamaPayoutRepository, member_repo: ChamaMemberRepository):
+        self.payout_repo = payout_repo
+        self.member_repo = member_repo
+
+    async def execute(self, *, chama_id: str, requesting_user_id: str, limit: int, offset: int) -> tuple[list[ChamaPayout], int]:
+        requester_membership = await self.member_repo.get_for_user(chama_id, requesting_user_id)
+        if requester_membership is None:
+            raise NotAMemberOfThisChama(chama_id)
+        return await self.payout_repo.list_for_chama(chama_id, limit, offset)

@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, Tbody, Td, Th, Thead, Tr } from "@/components/ui/table";
 import { useAddMember, useChamaMembers, usePunctuality, useRecordContribution } from "@/features/chama-portal/api";
+import { ContributionHistoryTable } from "@/features/chama-portal/components/ContributionHistoryTable";
+import { PayoutScheduleTable } from "@/features/chama-portal/components/PayoutScheduleTable";
 
 export function ChamaDetail({ chamaId }: { chamaId: string }) {
   const { data: members, isLoading } = useChamaMembers(chamaId);
@@ -95,6 +97,18 @@ export function ChamaDetail({ chamaId }: { chamaId: string }) {
           {contributionError && <p className="text-sm text-red-600">{contributionError}</p>}
         </div>
       )}
+
+      {selectedMemberId && (
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-slate-700">Contribution history</p>
+          <ContributionHistoryTable memberId={selectedMemberId} />
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <p className="text-sm font-medium text-slate-700">Payout schedule</p>
+        <PayoutScheduleTable chamaId={chamaId} />
+      </div>
     </div>
   );
 }

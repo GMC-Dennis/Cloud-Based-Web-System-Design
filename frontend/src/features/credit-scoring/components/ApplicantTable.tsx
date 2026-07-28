@@ -1,20 +1,77 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 import { Badge, riskTierTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, Tbody, Td, Th, Thead, Tr } from "@/components/ui/table";
-import { useApplicants, useCreateLoan } from "@/features/credit-scoring/api";
+import { useApplicants, useCreateLoan, useLoanRepayments, useRecordRepayment } from "@/features/credit-scoring/api";
 
 const PAGE_SIZE = 50;
+const DEFAULT_INTEREST_RATE = "0.05";
+const MAX_INTEREST_RATE = 0.5; // 50% -- a sane ceiling, not the column's raw Decimal(5,4) limit.
+
+function isValidInterestRate(value: string): boolean {
+  const parsed = Number(value);
+  return value !== "" && Number.isFinite(parsed) && parsed > 0 && parsed <= MAX_INTEREST_RATE;
+}
+
+function RepaymentHistory({ loanId }: { loanId: string }) {
+  const { data: repayments, isLoading } = useLoanRepayments(loanId);
+
+  if (isLoading) return <p className="text-xs text-slate-500">Loading repayments...</p>;
+  if (!repayments?.length) return <p className="text-xs text-slate-500">No repayments recorded yet.</p>;
+
+  return (
+    <ul className="space-y-1 text-xs text-slate-600">
+      {repayments.map((r) => (
+        <li key={r.id}>
+          KES {r.amount} — {new Date(r.paid_at).toLocaleDateString()}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function LoanRepaymentSection({ loanId }: { loanId: string }) {
+  const recordRepayment = useRecordRepayment();
+  const [amount, setAmount] = useState("");
+
+  return (
+    <div className="space-y-2 rounded-md border border-slate-200 p-3">
+      <div className="flex items-center gap-2">
+        <Input
+          className="h-8 w-28"
+          placeholder="Amount"
+          inputMode="decimal"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+        />
+        <Button
+          size="sm"
+          disabled={recordRepayment.isPending || !amount}
+          onClick={async () => {
+            await recordRepayment.mutateAsync({ loanId, amount });
+            setAmount("");
+          }}
+        >
+          Record repayment
+        </Button>
+      </div>
+
+      <RepaymentHistory loanId={loanId} />
+    </div>
+  );
+}
 
 export function ApplicantTable() {
   const [offset, setOffset] = useState(0);
   const { data, isLoading } = useApplicants({ limit: PAGE_SIZE, offset });
   const createLoan = useCreateLoan();
   const [principalByScore, setPrincipalByScore] = useState<Record<string, string>>({});
+  const [interestRateByScore, setInterestRateByScore] = useState<Record<string, string>>({});
+  const [expandedLoanId, setExpandedLoanId] = useState<string | null>(null);
 
   if (isLoading) return <p className="text-sm text-slate-500">Loading applicants...</p>;
   if (!data?.items.length) return <p className="text-sm text-slate-500">No applicants scored yet.</p>;
@@ -36,45 +93,68 @@ export function ApplicantTable() {
           </Tr>
         </Thead>
         <Tbody>
-          {data.items.map((a) => (
-            <Tr key={a.credit_score_id}>
-              <Td>{a.applicant_name ?? "Anonymized until approval"}</Td>
-              <Td>{a.credit_score}</Td>
-              <Td>
-                <Badge tone={riskTierTone(a.risk_tier)}>{a.risk_tier}</Badge>
-              </Td>
-              <Td>KES {a.recommended_limit}</Td>
-              <Td>{a.status ?? "No loan yet"}</Td>
-              <Td>
-                {!a.loan_id && (
-                  <div className="flex items-center gap-2">
-                    <Input
-                      className="h-8 w-24"
-                      placeholder="Principal"
-                      value={principalByScore[a.credit_score_id] ?? ""}
-                      onChange={(e) => setPrincipalByScore((s) => ({ ...s, [a.credit_score_id]: e.target.value }))}
-                    />
-                    <Button
-                      size="sm"
-                      disabled={createLoan.isPending || !principalByScore[a.credit_score_id]}
-                      onClick={() =>
-                        createLoan.mutate({
-                          // No borrower_id here on purpose -- the backend resolves it
-                          // from credit_score_id, since this view is anonymized.
-                          credit_score_id: a.credit_score_id,
-                          underwriting_method: "ALGORITHMIC",
-                          principal: principalByScore[a.credit_score_id],
-                          interest_rate: "0.05",
-                        })
-                      }
-                    >
-                      Approve
-                    </Button>
-                  </div>
+          {data.items.map((a) => {
+            const interestRate = interestRateByScore[a.credit_score_id] ?? DEFAULT_INTEREST_RATE;
+            return (
+              <Fragment key={a.credit_score_id}>
+                <Tr>
+                  <Td>{a.applicant_name ?? "Anonymized until approval"}</Td>
+                  <Td>{a.credit_score}</Td>
+                  <Td>
+                    <Badge tone={riskTierTone(a.risk_tier)}>{a.risk_tier}</Badge>
+                  </Td>
+                  <Td>KES {a.recommended_limit}</Td>
+                  <Td>{a.status ?? "No loan yet"}</Td>
+                  <Td>
+                    {a.loan_id ? (
+                      <Button size="sm" variant="secondary" onClick={() => setExpandedLoanId(expandedLoanId === a.loan_id ? null : a.loan_id)}>
+                        {expandedLoanId === a.loan_id ? "Hide loan" : "View loan"}
+                      </Button>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <Input
+                          className="h-8 w-24"
+                          placeholder="Principal"
+                          value={principalByScore[a.credit_score_id] ?? ""}
+                          onChange={(e) => setPrincipalByScore((s) => ({ ...s, [a.credit_score_id]: e.target.value }))}
+                        />
+                        <Input
+                          className="h-8 w-20"
+                          placeholder="Rate (0.05)"
+                          inputMode="decimal"
+                          value={interestRate}
+                          onChange={(e) => setInterestRateByScore((s) => ({ ...s, [a.credit_score_id]: e.target.value }))}
+                        />
+                        <Button
+                          size="sm"
+                          disabled={createLoan.isPending || !principalByScore[a.credit_score_id] || !isValidInterestRate(interestRate)}
+                          onClick={() =>
+                            createLoan.mutate({
+                              // No borrower_id here on purpose -- the backend resolves it
+                              // from credit_score_id, since this view is anonymized.
+                              credit_score_id: a.credit_score_id,
+                              underwriting_method: "ALGORITHMIC",
+                              principal: principalByScore[a.credit_score_id],
+                              interest_rate: interestRate,
+                            })
+                          }
+                        >
+                          Approve
+                        </Button>
+                      </div>
+                    )}
+                  </Td>
+                </Tr>
+                {a.loan_id && expandedLoanId === a.loan_id && (
+                  <Tr>
+                    <Td colSpan={6}>
+                      <LoanRepaymentSection loanId={a.loan_id} />
+                    </Td>
+                  </Tr>
                 )}
-              </Td>
-            </Tr>
-          ))}
+              </Fragment>
+            );
+          })}
         </Tbody>
       </Table>
 

@@ -127,13 +127,20 @@ class SqlChamaContributionRepository:
             return 0.0
         return (on_time / total) * 100.0
 
-    async def list_for_member(self, member_id: str) -> list[ChamaContribution]:
+    async def list_for_member(self, member_id: str, limit: int, offset: int) -> tuple[list[ChamaContribution], int]:
+        total = (
+            await self.session.execute(select(func.count()).select_from(ContributionModel).where(ContributionModel.member_id == uuid.UUID(member_id)))
+        ).scalar_one()
         rows = (
             await self.session.execute(
-                select(ContributionModel).where(ContributionModel.member_id == uuid.UUID(member_id)).order_by(ContributionModel.cycle_due_date.desc())
+                select(ContributionModel)
+                .where(ContributionModel.member_id == uuid.UUID(member_id))
+                .order_by(ContributionModel.cycle_due_date.desc(), ContributionModel.id)
+                .limit(limit)
+                .offset(offset)
             )
         ).scalars()
-        return [_to_contribution(r) for r in rows]
+        return [_to_contribution(r) for r in rows], total
 
 
 class SqlChamaPayoutRepository:
@@ -147,6 +154,17 @@ class SqlChamaPayoutRepository:
         await self.session.refresh(row)
         return _to_payout(row)
 
-    async def list_for_chama(self, chama_id: str) -> list[ChamaPayout]:
-        rows = (await self.session.execute(select(PayoutModel).where(PayoutModel.chama_id == uuid.UUID(chama_id)))).scalars()
-        return [_to_payout(r) for r in rows]
+    async def list_for_chama(self, chama_id: str, limit: int, offset: int) -> tuple[list[ChamaPayout], int]:
+        total = (
+            await self.session.execute(select(func.count()).select_from(PayoutModel).where(PayoutModel.chama_id == uuid.UUID(chama_id)))
+        ).scalar_one()
+        rows = (
+            await self.session.execute(
+                select(PayoutModel)
+                .where(PayoutModel.chama_id == uuid.UUID(chama_id))
+                .order_by(PayoutModel.scheduled_date.asc(), PayoutModel.id)
+                .limit(limit)
+                .offset(offset)
+            )
+        ).scalars()
+        return [_to_payout(r) for r in rows], total

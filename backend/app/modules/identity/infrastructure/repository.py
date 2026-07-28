@@ -99,6 +99,20 @@ class SqlUserRepository:
         )
         return {str(row.id): row.full_name for row in rows}
 
+    async def search_borrowers_by_phone(self, phone_query: str, limit: int, offset: int) -> tuple[list[User], int]:
+        conditions = (
+            UserModel.deleted_at.is_(None),
+            UserModel.role.in_(("MERCHANT", "CHAMA_MEMBER")),
+            UserModel.phone_number.ilike(f"%{phone_query}%"),
+        )
+        total = (await self.session.execute(select(func.count()).select_from(UserModel).where(*conditions))).scalar_one()
+        rows = (
+            await self.session.execute(
+                select(UserModel).where(*conditions).order_by(UserModel.full_name, UserModel.id).limit(limit).offset(offset)
+            )
+        ).scalars()
+        return [_to_domain_user(r) for r in rows], total
+
 
 class SqlOtpChallengeRepository:
     def __init__(self, session: AsyncSession):

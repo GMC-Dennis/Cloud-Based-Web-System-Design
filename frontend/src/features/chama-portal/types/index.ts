@@ -24,3 +24,12 @@ export interface Contribution {
   paid_at: string | null;
   is_on_time: boolean | null;
 }
+
+export interface Payout {
+  id: string;
+  chama_id: string;
+  recipient_member_id: string;
+  payout_amount: string;
+  scheduled_date: string;
+  paid_out_at: string | null;
+}

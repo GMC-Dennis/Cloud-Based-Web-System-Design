@@ -5,13 +5,21 @@ from app.core.cache import get_redis
 from app.core.db import get_db
 from app.core.deps import CurrentUser, get_current_user
 from app.core.pagination import Page, PageParams
-from app.modules.chama.application.exceptions import CannotRecordOwnContribution, NotAuthorizedToRecordContribution
+from app.modules.chama.application.exceptions import (
+    CannotRecordOwnContribution,
+    MemberNotFound,
+    NotAMemberOfThisChama,
+    NotAuthorizedToRecordContribution,
+    NotAuthorizedToSchedulePayout,
+)
 from app.modules.chama.application.use_cases import (
     AddMember,
     CreateChama,
     GetPunctuality,
+    ListContributions,
     ListMembers,
     ListMyChamas,
+    ListPayouts,
     RecordContribution,
     SchedulePayout,
 )
@@ -98,10 +106,45 @@ async def get_punctuality(member_id: str, db: AsyncSession = Depends(get_db), _:
     return PunctualityOut(member_id=member_id, punctuality_pct=pct)
 
 
+@router.get("/members/{member_id}/contributions", response_model=Page[ContributionOut])
+async def list_contributions(
+    member_id: str, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user), page: PageParams = Depends()
+) -> Page[ContributionOut]:
+    try:
+        contributions, total = await ListContributions(SqlChamaContributionRepository(db), SqlChamaMemberRepository(db)).execute(
+            member_id=member_id, requesting_user_id=user.id, limit=page.limit, offset=page.offset
+        )
+    except MemberNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except NotAMemberOfThisChama as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    return Page(items=[ContributionOut(**c.__dict__) for c in contributions], total=total, limit=page.limit, offset=page.offset)
+
+
 @router.post("/payouts", response_model=PayoutOut)
-async def schedule_payout(body: SchedulePayoutIn, chama_id: str, db: AsyncSession = Depends(get_db), _: CurrentUser = Depends(get_current_user)) -> PayoutOut:
-    payout = await SchedulePayout(SqlChamaPayoutRepository(db)).execute(
-        chama_id=chama_id, recipient_member_id=body.recipient_member_id, payout_amount=body.payout_amount, scheduled_date=body.scheduled_date
-    )
+async def schedule_payout(body: SchedulePayoutIn, chama_id: str, db: AsyncSession = Depends(get_db), actor: CurrentUser = Depends(get_current_user)) -> PayoutOut:
+    try:
+        payout = await SchedulePayout(SqlChamaPayoutRepository(db), SqlChamaMemberRepository(db)).execute(
+            chama_id=chama_id,
+            recipient_member_id=body.recipient_member_id,
+            payout_amount=body.payout_amount,
+            scheduled_date=body.scheduled_date,
+            scheduled_by_user_id=actor.id,
+        )
+    except NotAuthorizedToSchedulePayout as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
     await db.commit()
     return PayoutOut(**payout.__dict__)
+
+
+@router.get("/groups/{chama_id}/payouts", response_model=Page[PayoutOut])
+async def list_payouts(
+    chama_id: str, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user), page: PageParams = Depends()
+) -> Page[PayoutOut]:
+    try:
+        payouts, total = await ListPayouts(SqlChamaPayoutRepository(db), SqlChamaMemberRepository(db)).execute(
+            chama_id=chama_id, requesting_user_id=user.id, limit=page.limit, offset=page.offset
+        )
+    except NotAMemberOfThisChama as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    return Page(items=[PayoutOut(**p.__dict__) for p in payouts], total=total, limit=page.limit, offset=page.offset)

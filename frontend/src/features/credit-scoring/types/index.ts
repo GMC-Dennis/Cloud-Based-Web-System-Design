@@ -41,3 +41,10 @@ export interface Repayment {
   amount: string;
   paid_at: string;
 }
+
+export interface BorrowerSearchResult {
+  id: string;
+  full_name: string;
+  phone_number: string;
+  role: string;
+}

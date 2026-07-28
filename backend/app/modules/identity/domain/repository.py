@@ -33,6 +33,14 @@ class UserRepository(Protocol):
         """Batch name lookup (any status) for enriching audit-log rows with
         a human-readable actor/target instead of a bare UUID."""
         ...
+    async def search_borrowers_by_phone(self, phone_query: str, limit: int, offset: int) -> tuple[list[User], int]:
+        """Active MERCHANT/CHAMA_MEMBER users whose phone number contains
+        phone_query -- scoped narrowly for the underwriter borrower-lookup
+        flow (UNDERWRITER spec §4.2, manual/override loan creation). Never
+        returns ADMIN/UNDERWRITER accounts or deactivated users; this is a
+        borrower-finder, not a general user directory (that's GET
+        /admin/users, ADMIN-only)."""
+        ...
 
 
 class OtpChallengeRepository(Protocol):
