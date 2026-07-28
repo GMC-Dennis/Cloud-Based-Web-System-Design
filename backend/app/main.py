@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.cache import get_redis
 from app.core.config import get_settings
 from app.modules.chama.presentation.router import router as chama_router
+from app.modules.identity.presentation.admin_router import router as admin_router
 from app.modules.identity.presentation.router import router as identity_router
 from app.modules.ledger.presentation.router import router as ledger_router
 from app.modules.scoring.infrastructure.scoring_engine import AlternativeCreditScorer
@@ -42,6 +43,7 @@ app.add_middleware(
 )
 
 app.include_router(identity_router)
+app.include_router(admin_router)
 app.include_router(ledger_router)
 app.include_router(chama_router)
 app.include_router(scoring_router)
