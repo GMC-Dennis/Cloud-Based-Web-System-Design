@@ -21,6 +21,10 @@ class PhoneNumber:
         return self.value
 
 
+VALID_ROLES = ("MERCHANT", "CHAMA_MEMBER", "UNDERWRITER", "ADMIN")
+SELF_ASSIGNABLE_ROLES = ("MERCHANT", "CHAMA_MEMBER")
+
+
 @dataclass
 class User:
     id: str
@@ -29,6 +33,7 @@ class User:
     role: str
     created_at: datetime
     deleted_at: datetime | None = None
+    created_by: str | None = None
 
     @property
     def is_active(self) -> bool:

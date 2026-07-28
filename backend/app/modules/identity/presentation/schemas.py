@@ -9,7 +9,11 @@ class OtpVerifyIn(BaseModel):
     phone_number: str
     code: str = Field(min_length=4, max_length=8)
     full_name: str | None = None
-    role: str | None = Field(default=None, description="Required on first-time login: MERCHANT, CHAMA_MEMBER, or UNDERWRITER")
+    role: str | None = Field(
+        default=None,
+        description="Required on first-time login: MERCHANT or CHAMA_MEMBER only. "
+        "UNDERWRITER/ADMIN accounts must be provisioned by an existing admin, not self-assigned here.",
+    )
 
 
 class TokenPairOut(BaseModel):

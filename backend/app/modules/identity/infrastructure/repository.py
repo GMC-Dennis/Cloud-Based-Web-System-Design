@@ -17,6 +17,7 @@ def _to_domain_user(row: UserModel) -> User:
         role=row.role,
         created_at=row.created_at,
         deleted_at=row.deleted_at,
+        created_by=str(row.created_by) if row.created_by else None,
     )
 
 
@@ -32,16 +33,63 @@ class SqlUserRepository:
         ).scalar_one_or_none()
         return _to_domain_user(row) if row else None
 
+    async def get_by_phone_any_status(self, phone_number: str) -> User | None:
+        row = (
+            await self.session.execute(select(UserModel).where(UserModel.phone_number == phone_number))
+        ).scalar_one_or_none()
+        return _to_domain_user(row) if row else None
+
     async def get_by_id(self, user_id: str) -> User | None:
         row = await self.session.get(UserModel, uuid.UUID(user_id))
         return _to_domain_user(row) if row and row.deleted_at is None else None
 
-    async def create(self, *, phone_number: str, full_name: str, role: str) -> User:
-        row = UserModel(phone_number=phone_number, full_name=full_name, role=role)
+    async def get_by_id_any_status(self, user_id: str) -> User | None:
+        row = await self.session.get(UserModel, uuid.UUID(user_id))
+        return _to_domain_user(row) if row else None
+
+    async def create(self, *, phone_number: str, full_name: str, role: str, created_by: str | None = None) -> User:
+        row = UserModel(
+            phone_number=phone_number, full_name=full_name, role=role, created_by=uuid.UUID(created_by) if created_by else None
+        )
         self.session.add(row)
         await self.session.flush()
         await self.session.refresh(row)
         return _to_domain_user(row)
+
+    async def list_all(
+        self, *, limit: int, offset: int, role: str | None = None, include_inactive: bool = False
+    ) -> tuple[list[User], int]:
+        conditions = []
+        if role is not None:
+            conditions.append(UserModel.role == role)
+        if not include_inactive:
+            conditions.append(UserModel.deleted_at.is_(None))
+
+        total = (await self.session.execute(select(func.count()).select_from(UserModel).where(*conditions))).scalar_one()
+        rows = (
+            await self.session.execute(
+                select(UserModel).where(*conditions).order_by(UserModel.created_at.desc(), UserModel.id).limit(limit).offset(offset)
+            )
+        ).scalars()
+        return [_to_domain_user(r) for r in rows], total
+
+    async def update(self, user_id: str, *, full_name: str | None = None, role: str | None = None) -> User:
+        row = await self.session.get(UserModel, uuid.UUID(user_id))
+        if full_name is not None:
+            row.full_name = full_name
+        if role is not None:
+            row.role = role
+        await self.session.flush()
+        await self.session.refresh(row)
+        return _to_domain_user(row)
+
+    async def deactivate(self, user_id: str) -> None:
+        await self.session.execute(
+            update(UserModel).where(UserModel.id == uuid.UUID(user_id)).values(deleted_at=datetime.now(timezone.utc))
+        )
+
+    async def reactivate(self, user_id: str) -> None:
+        await self.session.execute(update(UserModel).where(UserModel.id == uuid.UUID(user_id)).values(deleted_at=None))
 
 
 class SqlOtpChallengeRepository:
@@ -135,6 +183,16 @@ class SqlRefreshTokenRepository:
     async def revoke(self, token_id: str) -> None:
         await self.session.execute(
             update(RefreshToken).where(RefreshToken.id == uuid.UUID(token_id)).values(revoked_at=datetime.now(timezone.utc))
+        )
+
+    async def revoke_all_for_user(self, user_id: str) -> None:
+        """Called when deactivating an account -- an already-issued refresh
+        token must stop being able to mint new access tokens immediately,
+        not just wait for the user row's deleted_at to be noticed elsewhere."""
+        await self.session.execute(
+            update(RefreshToken)
+            .where(RefreshToken.user_id == uuid.UUID(user_id), RefreshToken.revoked_at.is_(None))
+            .values(revoked_at=datetime.now(timezone.utc))
         )
 
     async def revoke_family(self, token_id: str) -> None:

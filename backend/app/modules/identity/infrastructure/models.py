@@ -13,7 +13,7 @@ class User(Base):
     __tablename__ = "users"
     __table_args__ = (
         CheckConstraint("deleted_at IS NULL OR deleted_at >= created_at", name="chk_deleted_after_created"),
-        CheckConstraint("role IN ('MERCHANT', 'CHAMA_MEMBER', 'UNDERWRITER')", name="chk_users_role"),
+        CheckConstraint("role IN ('MERCHANT', 'CHAMA_MEMBER', 'UNDERWRITER', 'ADMIN')", name="chk_users_role"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=func.gen_random_uuid())
@@ -22,6 +22,9 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(20), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.current_timestamp())
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     __mapper_args__ = {"confirm_deleted_rows": False}
 

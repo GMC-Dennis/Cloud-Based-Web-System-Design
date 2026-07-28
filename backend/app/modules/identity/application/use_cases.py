@@ -9,14 +9,16 @@ from app.core.security import (
     verify_otp_code,
 )
 from app.modules.identity.application.exceptions import (
+    AccountDeactivated,
     OtpInvalid,
     OtpLocked,
     OtpRateLimited,
     RefreshTokenInvalid,
     RefreshTokenReused,
+    RoleNotSelfAssignable,
     UserNotRegistered,
 )
-from app.modules.identity.domain.entities import PhoneNumber, User
+from app.modules.identity.domain.entities import SELF_ASSIGNABLE_ROLES, PhoneNumber, User
 from app.modules.identity.domain.repository import (
     OtpChallengeRepository,
     RefreshTokenRepository,
@@ -68,6 +70,13 @@ class VerifyOtp:
             await self.otp_repo.increment_attempt(challenge["id"])
             raise OtpInvalid("Incorrect code")
 
+        # Checked before the active-only lookup: a deactivated phone number
+        # must not be silently treated as brand-new (which would let it
+        # re-register with a fresh name/role and defeat the deactivation).
+        existing_any_status = await self.user_repo.get_by_phone_any_status(phone)
+        if existing_any_status is not None and not existing_any_status.is_active:
+            raise AccountDeactivated("This account has been deactivated")
+
         # Deliberately checked before consuming the challenge: a brand-new
         # phone number's first verify call (no full_name/role yet) needs to
         # raise UserNotRegistered while leaving the code valid, so the
@@ -77,6 +86,11 @@ class VerifyOtp:
         if user is None:
             if full_name is None or role is None:
                 raise UserNotRegistered("First-time login requires full_name and role")
+            if role not in SELF_ASSIGNABLE_ROLES:
+                # UNDERWRITER/ADMIN must be provisioned by an existing admin
+                # (see admin_use_cases.CreateUserByAdmin) -- self-assigning
+                # into them here would be a privilege-escalation gap.
+                raise RoleNotSelfAssignable(f"Role '{role}' cannot be self-assigned at signup")
             user = await self.user_repo.create(phone_number=phone, full_name=full_name, role=role)
 
         await self.otp_repo.mark_consumed(challenge["id"])

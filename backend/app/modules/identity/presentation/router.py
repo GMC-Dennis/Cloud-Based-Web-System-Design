@@ -4,11 +4,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings, get_settings
 from app.core.db import get_db
 from app.modules.identity.application.exceptions import (
+    AccountDeactivated,
     OtpInvalid,
     OtpLocked,
     OtpRateLimited,
     RefreshTokenInvalid,
     RefreshTokenReused,
+    RoleNotSelfAssignable,
     UserNotRegistered,
 )
 from app.modules.identity.application.use_cases import Logout, RefreshTokenRotation, RequestOtp, VerifyOtp
@@ -63,6 +65,11 @@ async def verify_otp(
     except UserNotRegistered as exc:
         await db.commit()
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    except RoleNotSelfAssignable as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+    except AccountDeactivated as exc:
+        await db.commit()  # persist the incremented attempt count from the code check above
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
 
     return TokenPairOut(access_token=access_token, refresh_token=refresh_token, user_id=user.id, role=user.role)
 
