@@ -34,3 +34,10 @@ export interface Loan {
   due_date: string | null;
   created_at: string;
 }
+
+export interface Repayment {
+  id: string;
+  loan_id: string;
+  amount: string;
+  paid_at: string;
+}

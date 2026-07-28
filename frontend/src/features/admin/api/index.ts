@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiClient } from "@/lib/api-client";
 import type { Page } from "@/lib/pagination";
-import type { AdminUser, Role } from "@/features/admin/types";
+import type { AdminUser, AuditAction, AuditLogEntry, Role } from "@/features/admin/types";
 
 export function useUsers(params: { limit?: number; offset?: number; role?: Role; includeInactive?: boolean } = {}) {
   const { limit = 50, offset = 0, role, includeInactive = false } = params;
@@ -48,5 +48,20 @@ export function useReactivateUser() {
   return useMutation({
     mutationFn: async (userId: string) => (await apiClient.post(`/admin/users/${userId}/reactivate`)).data,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["admin", "users"] }),
+  });
+}
+
+export function useAuditLog(
+  params: { limit?: number; offset?: number; action?: AuditAction; targetUserId?: string } = {}
+) {
+  const { limit = 50, offset = 0, action, targetUserId } = params;
+  return useQuery({
+    queryKey: ["admin", "audit-log", limit, offset, action, targetUserId],
+    queryFn: async () =>
+      (
+        await apiClient.get<Page<AuditLogEntry>>("/admin/audit-log", {
+          params: { limit, offset, action, target_user_id: targetUserId },
+        })
+      ).data,
   });
 }

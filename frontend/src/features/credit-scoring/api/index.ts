@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { apiClient } from "@/lib/api-client";
 import type { Page } from "@/lib/pagination";
-import type { Applicant, CreditScore, Loan } from "@/features/credit-scoring/types";
+import type { Applicant, CreditScore, Loan, Repayment } from "@/features/credit-scoring/types";
 
 export function useLatestScore(userId: string | null) {
   return useQuery({
@@ -33,6 +33,14 @@ export function useMyLoans() {
   return useQuery({
     queryKey: ["scoring", "loans", "mine"],
     queryFn: async () => (await apiClient.get<Page<Loan>>("/loans/mine", { params: { limit: 200 } })).data.items,
+  });
+}
+
+export function useLoanRepayments(loanId: string) {
+  return useQuery({
+    queryKey: ["scoring", "loans", loanId, "repayments"],
+    queryFn: async () => (await apiClient.get<Page<Repayment>>(`/loans/${loanId}/repayments`, { params: { limit: 200 } })).data.items,
+    enabled: !!loanId,
   });
 }
 

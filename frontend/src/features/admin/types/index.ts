@@ -10,3 +10,16 @@ export interface AdminUser {
   created_by: string | null;
   is_active: boolean;
 }
+
+export type AuditAction = "CREATE_USER" | "UPDATE_USER" | "DEACTIVATE_USER" | "REACTIVATE_USER";
+
+export interface AuditLogEntry {
+  id: string;
+  actor_user_id: string;
+  actor_full_name: string | null;
+  target_user_id: string | null;
+  target_full_name: string | null;
+  action: AuditAction;
+  detail: Record<string, unknown> | null;
+  created_at: string;
+}
