@@ -5,6 +5,7 @@ from app.core.cache import get_redis
 from app.core.db import get_db
 from app.core.deps import CurrentUser, get_current_user
 from app.core.pagination import Page, PageParams
+from app.modules.chama.application.exceptions import CannotRecordOwnContribution, NotAuthorizedToRecordContribution
 from app.modules.chama.application.use_cases import (
     AddMember,
     CreateChama,
@@ -68,21 +69,25 @@ async def list_members(
 
 
 @router.post("/contributions", response_model=ContributionOut)
-async def record_contribution(body: RecordContributionIn, db: AsyncSession = Depends(get_db), _: CurrentUser = Depends(get_current_user)) -> ContributionOut:
+async def record_contribution(body: RecordContributionIn, db: AsyncSession = Depends(get_db), actor: CurrentUser = Depends(get_current_user)) -> ContributionOut:
     member_repo = SqlChamaMemberRepository(db)
     member = await member_repo.get(body.member_id)
     if member is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such chama member")
 
-    contribution = await RecordContribution(SqlChamaContributionRepository(db), get_redis()).execute(
-        chama_id=member.chama_id,
-        member_id=body.member_id,
-        cycle_due_date=body.cycle_due_date,
-        amount_due=body.amount_due,
-        amount_paid=body.amount_paid,
-        paid_at=body.paid_at,
-        user_id=member.user_id,
-    )
+    try:
+        contribution = await RecordContribution(SqlChamaContributionRepository(db), member_repo, get_redis()).execute(
+            chama_id=member.chama_id,
+            member_id=body.member_id,
+            cycle_due_date=body.cycle_due_date,
+            amount_due=body.amount_due,
+            amount_paid=body.amount_paid,
+            paid_at=body.paid_at,
+            target_user_id=member.user_id,
+            recorded_by_user_id=actor.id,
+        )
+    except (CannotRecordOwnContribution, NotAuthorizedToRecordContribution) as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
     await db.commit()
     return ContributionOut(**contribution.__dict__)
 

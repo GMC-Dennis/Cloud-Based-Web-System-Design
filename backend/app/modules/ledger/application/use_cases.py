@@ -5,6 +5,7 @@ from decimal import Decimal
 from redis.asyncio import Redis
 
 from app.core.cache import invalidate_score_cache
+from app.modules.ledger.application.exceptions import ProductNotOwnedByMerchant, SaleRequiresLineItems
 from app.modules.ledger.domain.entities import DukaTransaction, Product
 from app.modules.ledger.domain.hashing import GENESIS_HASH, compute_record_hash
 from app.modules.ledger.domain.repository import InventoryRepository, LedgerRepository, ProductRepository
@@ -49,9 +50,12 @@ class _AppendLedgerEntry:
 
 
 class RecordSale:
-    def __init__(self, ledger_repo: LedgerRepository, inventory_repo: InventoryRepository, redis: Redis | None = None):
+    def __init__(
+        self, ledger_repo: LedgerRepository, inventory_repo: InventoryRepository, product_repo: ProductRepository, redis: Redis | None = None
+    ):
         self._append = _AppendLedgerEntry(ledger_repo)
         self.inventory_repo = inventory_repo
+        self.product_repo = product_repo
         self.redis = redis
 
     async def execute(
@@ -64,10 +68,21 @@ class RecordSale:
         customer_phone: str | None = None,
         line_items: list[SaleLineItem] | None = None,
     ) -> DukaTransaction:
+        line_items = line_items or []
+        if not line_items:
+            raise SaleRequiresLineItems("A sale must reference at least one product line item")
+
+        for item in line_items:
+            product = await self.product_repo.get(item.product_id)
+            if product is None or product.merchant_id != merchant_id:
+                raise ProductNotOwnedByMerchant(f"Product {item.product_id} does not belong to this merchant")
+
+        # Validated before anything is written -- a rejected sale should
+        # never touch the hash chain at all, not rely on a rollback to undo it.
         txn = await self._append.execute(
             merchant_id=merchant_id, amount=amount, currency=currency, transaction_type="SALE", is_credit=is_credit, customer_phone=customer_phone
         )
-        for item in line_items or []:
+        for item in line_items:
             await self.inventory_repo.record_movement(
                 product_id=item.product_id, duka_transaction_id=txn.id, quantity_delta=-item.quantity
             )
@@ -115,10 +130,14 @@ class CreateProduct:
 
 
 class RestockProduct:
-    def __init__(self, inventory_repo: InventoryRepository):
+    def __init__(self, inventory_repo: InventoryRepository, product_repo: ProductRepository):
         self.inventory_repo = inventory_repo
+        self.product_repo = product_repo
 
-    async def execute(self, *, product_id: str, quantity: int):
+    async def execute(self, *, merchant_id: str, product_id: str, quantity: int):
+        product = await self.product_repo.get(product_id)
+        if product is None or product.merchant_id != merchant_id:
+            raise ProductNotOwnedByMerchant(f"Product {product_id} does not belong to this merchant")
         return await self.inventory_repo.record_movement(product_id=product_id, duka_transaction_id=None, quantity_delta=quantity)
 
 

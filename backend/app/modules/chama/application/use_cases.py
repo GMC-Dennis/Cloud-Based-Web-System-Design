@@ -4,6 +4,7 @@ from decimal import Decimal
 from redis.asyncio import Redis
 
 from app.core.cache import invalidate_score_cache
+from app.modules.chama.application.exceptions import CannotRecordOwnContribution, NotAuthorizedToRecordContribution
 from app.modules.chama.domain.entities import ChamaContribution, ChamaGroup, ChamaMember, ChamaPayout
 from app.modules.chama.domain.repository import (
     ChamaContributionRepository,
@@ -11,6 +12,8 @@ from app.modules.chama.domain.repository import (
     ChamaMemberRepository,
     ChamaPayoutRepository,
 )
+
+OFFICER_ROLES = ("CHAIRPERSON", "TREASURER", "SECRETARY")
 
 
 class CreateChama:
@@ -33,20 +36,39 @@ class AddMember:
 
 
 class RecordContribution:
-    def __init__(self, contribution_repo: ChamaContributionRepository, redis: Redis | None = None):
+    def __init__(self, contribution_repo: ChamaContributionRepository, member_repo: ChamaMemberRepository, redis: Redis | None = None):
         self.contribution_repo = contribution_repo
+        self.member_repo = member_repo
         self.redis = redis
 
     async def execute(
-        self, *, chama_id: str, member_id: str, cycle_due_date: date, amount_due: Decimal, amount_paid: Decimal, paid_at: datetime | None, user_id: str
+        self,
+        *,
+        chama_id: str,
+        member_id: str,
+        cycle_due_date: date,
+        amount_due: Decimal,
+        amount_paid: Decimal,
+        paid_at: datetime | None,
+        target_user_id: str,
+        recorded_by_user_id: str,
     ) -> ChamaContribution:
+        # Duty separation: a member can't attest to their own punctuality,
+        # and only an officer of *this* chama can attest to anyone's.
+        if recorded_by_user_id == target_user_id:
+            raise CannotRecordOwnContribution("A member cannot record their own contribution")
+
+        acting_membership = await self.member_repo.get_for_user(chama_id, recorded_by_user_id)
+        if acting_membership is None or acting_membership.member_role not in OFFICER_ROLES:
+            raise NotAuthorizedToRecordContribution("Only a chairperson, treasurer, or secretary of this chama can record a contribution")
+
         paid_at = paid_at or datetime.now(timezone.utc)
         is_on_time = paid_at.date() <= cycle_due_date
         contribution = await self.contribution_repo.record(
             chama_id=chama_id, member_id=member_id, cycle_due_date=cycle_due_date, amount_due=amount_due, amount_paid=amount_paid, paid_at=paid_at, is_on_time=is_on_time
         )
         if self.redis is not None:
-            await invalidate_score_cache(self.redis, user_id)
+            await invalidate_score_cache(self.redis, target_user_id)
         return contribution
 
 

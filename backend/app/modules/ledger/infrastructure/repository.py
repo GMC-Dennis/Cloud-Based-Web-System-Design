@@ -188,7 +188,11 @@ class SqlProductRepository:
         ).scalars()
         return [_to_domain_product(r) for r in rows], total
 
-    async def margin_stability(self, merchant_id: str) -> float:
+    async def margin_stability(self, merchant_id: str, since: datetime) -> float:
+        # Windowed to `since` (v1.5) -- previously all-time, which let a
+        # single burst of fabricated high-margin sales permanently distort
+        # this feature instead of decaying as real transaction volume
+        # accumulates, the same rolling window sales_velocity already uses.
         result = await self.session.execute(
             text(
                 """
@@ -197,10 +201,10 @@ class SqlProductRepository:
                     SUM(p.unit_price * ABS(im.quantity_delta)) AS revenue
                 FROM inventory_movements im
                 JOIN products p ON p.id = im.product_id
-                WHERE p.merchant_id = :merchant_id AND im.quantity_delta < 0
+                WHERE p.merchant_id = :merchant_id AND im.quantity_delta < 0 AND im.created_at >= :since
                 """
             ),
-            {"merchant_id": merchant_id},
+            {"merchant_id": merchant_id, "since": since},
         )
         row = result.one()
         gross_profit, revenue = row.gross_profit, row.revenue

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import get_redis
@@ -6,6 +6,7 @@ from app.core.db import get_db
 from app.core.deps import CurrentUser, get_current_user
 from app.core.idempotency import idempotent
 from app.core.pagination import Page, PageParams
+from app.modules.ledger.application.exceptions import ProductNotOwnedByMerchant, SaleRequiresLineItems
 from app.modules.ledger.application.use_cases import (
     CreateProduct,
     ListProducts,
@@ -42,7 +43,7 @@ async def record_sale(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> TransactionOut:
     async def execute() -> dict:
-        use_case = RecordSale(SqlLedgerRepository(db), SqlInventoryRepository(db), get_redis())
+        use_case = RecordSale(SqlLedgerRepository(db), SqlInventoryRepository(db), SqlProductRepository(db), get_redis())
         txn = await use_case.execute(
             merchant_id=user.id,
             amount=body.amount,
@@ -53,7 +54,12 @@ async def record_sale(
         )
         return TransactionOut(**txn.__dict__).model_dump(mode="json")
 
-    result = await idempotent(db, user_id=user.id, idempotency_key=idempotency_key, endpoint="ledger.record_sale", execute=execute)
+    try:
+        result = await idempotent(db, user_id=user.id, idempotency_key=idempotency_key, endpoint="ledger.record_sale", execute=execute)
+    except SaleRequiresLineItems as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc)) from exc
+    except ProductNotOwnedByMerchant as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
     await db.commit()
     return TransactionOut(**result)
 
@@ -119,5 +125,10 @@ async def list_products(
 
 @router.post("/products/{product_id}/restock", response_model=None, status_code=204)
 async def restock_product(product_id: str, body: RestockIn, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)) -> None:
-    await RestockProduct(SqlInventoryRepository(db)).execute(product_id=product_id, quantity=body.quantity)
+    try:
+        await RestockProduct(SqlInventoryRepository(db), SqlProductRepository(db)).execute(
+            merchant_id=user.id, product_id=product_id, quantity=body.quantity
+        )
+    except ProductNotOwnedByMerchant as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
     await db.commit()

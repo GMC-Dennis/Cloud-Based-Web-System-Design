@@ -37,7 +37,7 @@ class ComputeMerchantFeatures:
         sales_velocity = float(revenue_30d) / active_days if active_days > 0 else 0.0
 
         receivables_days = await self.ledger_repo.avg_receivables_days(user_id)
-        margin_stability = await self.product_repo.margin_stability(user_id)
+        margin_stability = await self.product_repo.margin_stability(user_id, since)
 
         memberships = await self.member_repo.list_for_user(user_id)
         if memberships:
