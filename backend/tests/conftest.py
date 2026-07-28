@@ -67,7 +67,7 @@ def event_loop():
 
 
 TABLES_IN_TRUNCATE_ORDER = (
-    "idempotency_keys, loan_repayments, loans, credit_scores, "
+    "admin_audit_log, idempotency_keys, loan_repayments, loans, credit_scores, "
     "chama_payouts, chama_contributions, chama_members, chama_groups, "
     "inventory_movements, products, duka_transactions, "
     "otp_challenges, refresh_tokens, users"

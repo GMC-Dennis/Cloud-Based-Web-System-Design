@@ -100,6 +100,54 @@ async def test_admin_can_list_update_and_deactivate_users(client, sent_otps, db_
     assert restored_login.status_code == 200
 
 
+async def test_admin_actions_each_produce_exactly_one_audit_row(client, sent_otps, db_session):
+    admin_token = await _create_admin_and_login(client, sent_otps, db_session, "+254760010000")
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    created = await client.post(
+        "/admin/users", json={"phone_number": "+254760010001", "full_name": "Audited User", "role": "MERCHANT"}, headers=headers
+    )
+    assert created.status_code == 200
+    target_id = created.json()["id"]
+
+    await client.patch(f"/admin/users/{target_id}", json={"full_name": "Renamed Audited User"}, headers=headers)
+    await client.post(f"/admin/users/{target_id}/deactivate", headers=headers)
+    await client.post(f"/admin/users/{target_id}/reactivate", headers=headers)
+
+    log = await client.get("/admin/audit-log", params={"target_user_id": target_id}, headers=headers)
+    assert log.status_code == 200
+    body = log.json()
+    actions = [row["action"] for row in body["items"]]
+    # Newest first.
+    assert actions == ["REACTIVATE_USER", "DEACTIVATE_USER", "UPDATE_USER", "CREATE_USER"]
+    assert body["total"] == 4
+    assert all(row["actor_user_id"] for row in body["items"])
+    assert all(row["target_user_id"] == target_id for row in body["items"])
+
+    update_row = next(row for row in body["items"] if row["action"] == "UPDATE_USER")
+    assert update_row["detail"] == {"before": {"full_name": "Audited User"}, "after": {"full_name": "Renamed Audited User"}}
+
+
+async def test_audit_log_is_filterable_by_action_and_actor(client, sent_otps, db_session):
+    admin_token = await _create_admin_and_login(client, sent_otps, db_session, "+254760011000")
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    _, merchant_id = await _register_merchant(client, sent_otps, "+254760011111")
+
+    await client.post(f"/admin/users/{merchant_id}/deactivate", headers=headers)
+    await client.post(f"/admin/users/{merchant_id}/reactivate", headers=headers)
+
+    by_action = await client.get("/admin/audit-log", params={"action": "DEACTIVATE_USER"}, headers=headers)
+    assert by_action.status_code == 200
+    assert all(row["action"] == "DEACTIVATE_USER" for row in by_action.json()["items"])
+    assert any(row["target_user_id"] == merchant_id for row in by_action.json()["items"])
+
+
+async def test_audit_log_endpoint_requires_admin_role(client, sent_otps):
+    token, _ = await _register_merchant(client, sent_otps, "+254760012222")
+    r = await client.get("/admin/audit-log", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 403
+
+
 async def test_deactivating_a_user_revokes_their_refresh_token(client, sent_otps, db_session):
     admin_token = await _create_admin_and_login(client, sent_otps, db_session, "+254760008888")
     headers = {"Authorization": f"Bearer {admin_token}"}
