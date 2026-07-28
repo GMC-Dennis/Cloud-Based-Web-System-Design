@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from app.modules.chama.domain.repository import ChamaContributionRepository, ChamaMemberRepository
 from app.modules.ledger.domain.repository import LedgerRepository, ProductRepository
+from app.modules.scoring.application.exceptions import LoanNotFound
 from app.modules.scoring.domain.entities import ApplicantView, CreditScore, Loan, LoanRepayment
 from app.modules.scoring.domain.repository import CreditScoreRepository, LoanRepository
 from app.modules.scoring.infrastructure.scoring_engine import AlternativeCreditScorer, MerchantFeatures
@@ -128,3 +129,20 @@ class ListApplicants:
 
     async def execute(self, limit: int, offset: int) -> tuple[list[ApplicantView], int]:
         return await self.loan_repo.list_applicants(limit, offset)
+
+
+class ListLoanRepayments:
+    """Fetches the loan alongside its repayments (rather than just the
+    repayments) so the router can enforce the "own loan or UNDERWRITER"
+    ownership check without a second round-trip -- mirrors the ownership
+    check already done inline for /scoring/scores/{user_id}/latest."""
+
+    def __init__(self, loan_repo: LoanRepository):
+        self.loan_repo = loan_repo
+
+    async def execute(self, loan_id: str, *, limit: int, offset: int) -> tuple[Loan, list[LoanRepayment], int]:
+        loan = await self.loan_repo.get(loan_id)
+        if loan is None:
+            raise LoanNotFound(loan_id)
+        repayments, total = await self.loan_repo.list_repayments_for_loan(loan_id, limit, offset)
+        return loan, repayments, total

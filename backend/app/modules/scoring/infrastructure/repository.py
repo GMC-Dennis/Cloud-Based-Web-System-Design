@@ -110,6 +110,21 @@ class SqlLoanRepository:
         await self.session.refresh(row)
         return LoanRepayment(id=str(row.id), loan_id=str(row.loan_id), amount=row.amount, paid_at=row.paid_at)
 
+    async def list_repayments_for_loan(self, loan_id: str, limit: int, offset: int) -> tuple[list[LoanRepayment], int]:
+        total = (
+            await self.session.execute(select(func.count()).select_from(RepaymentModel).where(RepaymentModel.loan_id == uuid.UUID(loan_id)))
+        ).scalar_one()
+        rows = (
+            await self.session.execute(
+                select(RepaymentModel)
+                .where(RepaymentModel.loan_id == uuid.UUID(loan_id))
+                .order_by(RepaymentModel.paid_at.desc(), RepaymentModel.id)
+                .limit(limit)
+                .offset(offset)
+            )
+        ).scalars()
+        return [LoanRepayment(id=str(r.id), loan_id=str(r.loan_id), amount=r.amount, paid_at=r.paid_at) for r in rows], total
+
     async def list_applicants(self, limit: int, offset: int) -> tuple[list[ApplicantView], int]:
         # Reads the anonymized underwriter_applicant_view (TDD §4) -- never
         # the base tables -- so applicant identity stays masked pre-approval.

@@ -6,11 +6,13 @@ from app.core.deps import CurrentUser, get_current_user, require_role
 from app.core.pagination import Page, PageParams
 from app.modules.chama.infrastructure.repository import SqlChamaContributionRepository, SqlChamaMemberRepository
 from app.modules.ledger.infrastructure.repository import SqlLedgerRepository, SqlProductRepository
+from app.modules.scoring.application.exceptions import LoanNotFound
 from app.modules.scoring.application.use_cases import (
     ComputeMerchantFeatures,
     CreateLoan,
     EvaluateMerchant,
     ListApplicants,
+    ListLoanRepayments,
     RecordRepayment,
 )
 from app.modules.scoring.infrastructure.repository import SqlCreditScoreRepository, SqlLoanRepository
@@ -103,6 +105,19 @@ async def record_repayment(loan_id: str, body: RecordRepaymentIn, db: AsyncSessi
     repayment = await RecordRepayment(SqlLoanRepository(db)).execute(loan_id, body.amount)
     await db.commit()
     return RepaymentOut(**repayment.__dict__)
+
+
+@router.get("/loans/{loan_id}/repayments", response_model=Page[RepaymentOut])
+async def list_loan_repayments(
+    loan_id: str, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user), page: PageParams = Depends()
+) -> Page[RepaymentOut]:
+    try:
+        loan, repayments, total = await ListLoanRepayments(SqlLoanRepository(db)).execute(loan_id, limit=page.limit, offset=page.offset)
+    except LoanNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    if user.id != loan.borrower_id and user.role != "UNDERWRITER":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Cannot view another borrower's repayments")
+    return Page(items=[RepaymentOut(**r.__dict__) for r in repayments], total=total, limit=page.limit, offset=page.offset)
 
 
 @router.get("/underwriter/applicants", response_model=Page[ApplicantOut], dependencies=[Depends(require_role("UNDERWRITER"))])
