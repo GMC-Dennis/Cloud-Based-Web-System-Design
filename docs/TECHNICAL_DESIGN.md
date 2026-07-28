@@ -6,7 +6,35 @@
 
 **Deployment Target:** Google Cloud Platform (GCP Always-Free Tier)
 
-**Version:** 1.3 (Revised)
+**Version:** 1.5 (Revised)
+
+### Revision Notes (v1.4 → v1.5)
+
+Closes the cheapest ways to game the alternative-credit-scoring inputs on the sales/inventory and chama-punctuality sides — identified in a review of what actually stops a merchant from cooking their own books to inflate their score. **Important framing, stated explicitly here because it's a common misreading of §4's hash chain:** the append-only, tamper-evident ledger design proves a transaction wasn't edited or deleted *after* being written. It says nothing about whether the transaction was real in the first place. These fixes target that second, separate problem, and even they don't fully close it — see the "still open" list at the end of this section.
+
+- **`POST /ledger/transactions/sale` now requires at least one line item.** Previously `line_items` was optional, meaning a merchant could record arbitrary "revenue" — `POST {"amount": "50000"}` — with zero corresponding inventory movement, directly inflating `sales_velocity` with nothing to cross-check against. A sale with no line items is now rejected (422). This is enforced in the application layer (`RecordSale`), validated *before* anything is written to the hash chain, not relied on a rollback to undo.
+- **Line items (and restocks) now verify product ownership.** Neither `RecordSale` nor `RestockProduct` previously checked that a referenced `product_id` belonged to the acting merchant — a merchant could reference (and thereby decrement, or restock) another merchant's product outright. Both now reject with 403 if the product doesn't belong to the caller.
+- **Chama contribution recording now enforces duty separation.** `POST /chama/contributions` previously let any authenticated user record any member's contribution, including their own — meaning a member could self-attest their own on-time payment, fabricating the `chama_punctuality` feature that feeds scoring. It now requires the acting user to (a) not be the member the contribution is credited to, and (b) hold an officer role (`CHAIRPERSON`/`TREASURER`/`SECRETARY`) within that specific chama. **Known consequence:** a chama with only one officer (e.g. freshly created, before a treasurer/secretary is added) has no one who can record that officer's own contribution — a second officer is required for that person's dues to ever be recorded by the app.
+- **`margin_stability` is now windowed to the same rolling 30 days as `sales_velocity`**, instead of all-time. Previously a single burst of fabricated high-margin transactions had a permanent effect on the score, since there was no natural decay as in the other time-windowed feature.
+- Frontend follow-on: the Duka Ledger sale form now requires picking a real product and quantity (previously amount-only, which would have been rejected outright by the backend fix above); the Chama Portal surfaces a clear "only an officer, not yourself" message instead of a bare failed request when the new duty-separation rule rejects a contribution.
+
+**Still open — these gaming vectors are known and deliberately not addressed yet:**
+- All of this data remains entirely self-reported. Nothing here corroborates a sale, restock, or contribution against an external source of truth (a mobile-money settlement record, a bank statement, another party's independent attestation beyond the chama-officer check above). Closing this properly means integrating a real payment rail (e.g. M-Pesa Daraja API confirmation) rather than trusting a manually-entered amount.
+- The merchant still controls *when* they call `POST /scoring/evaluate/{user_id}` — nothing stops a fabricate-then-immediately-evaluate pattern within the 30-day window these fixes now bound.
+- The `receivables_days` proxy (§5.1's documented gap) can still be gamed by fabricating a follow-up transaction under a made-up `customer_phone` to make a credit sale look promptly collected.
+- No statistical anomaly/outlier detection exists to flag suspicious patterns (e.g. a sudden volume spike right before an evaluation, an implausibly smooth margin) to the underwriter — the score is presented as clean and final with no fraud-risk signal alongside it.
+
+### Revision Notes (v1.3 → v1.4)
+
+Closes a real authorization gap identified during a user-journeys review, not just a documentation drift: prior versions let **any** phone number self-register as `UNDERWRITER` at signup, which is a privilege-escalation path into the loan-approval and applicant-view endpoints — the `require_role("UNDERWRITER")` checks added in earlier versions are only as trustworthy as the role itself, and the role was entirely attacker-controlled at signup.
+
+- Added a fourth role, `ADMIN`, to `users.role` (§4) alongside `MERCHANT`/`CHAMA_MEMBER`/`UNDERWRITER`.
+- **Self-registration is now restricted to `MERCHANT`/`CHAMA_MEMBER` only.** The public OTP signup flow (`POST /auth/otp/verify` on a brand-new phone number) rejects `UNDERWRITER`/`ADMIN` outright (403). `UNDERWRITER` and `ADMIN` accounts can now only be created by an existing admin.
+- Added `users.created_by` (nullable, self-referential FK) so every admin-provisioned account records who onboarded it.
+- Added a full admin capability under `/admin/*` (all endpoints gated by `require_role("ADMIN")`): create a user directly with any role (this is how underwriters get onboarded — no invite step, they just log in normally afterward since the role is already set), list/filter users (paginated), update a user's name/role, and deactivate/reactivate an account.
+- Added `scripts/create_admin.py` to bootstrap the very first admin account out-of-band (same pattern as `scripts/generate_jwt_keys.py`) — solves the chicken-and-egg problem of "who invites the first admin" without an open registration path.
+- Fixed a related correctness bug surfaced while building this: deactivating a user (`deleted_at`) previously had no real effect on login, because `get_by_phone` (used by the OTP verify flow) already filters to active-only users — a deactivated user hitting login would be treated as brand-new and shown the registration form again, able to re-create their account. The login flow now checks for a deactivated *existing* account first and returns 403, and deactivation also revokes all of that user's outstanding refresh tokens immediately rather than waiting for them to expire naturally.
+- No "reset password" equivalent was added — this is OTP-only auth with no password to reset. Deactivate covers the "lock this account out now" case; there's deliberately no separate force-logout action beyond what deactivation already does.
 
 ### Revision Notes (v1.2 → v1.3)
 
@@ -144,7 +172,8 @@ backend/
 │   ├── core/                        # Global Config, DB Engine, Security
 │   ├── modules/                     # BOUNDED CONTEXTS
 │   │   ├── identity/                 # Context 1: Users, OTP Auth, Refresh Tokens (NEW v1.3 --
-│   │   │                             # users/refresh_tokens/otp_challenges had no owning module before)
+│   │   │                             # users/refresh_tokens/otp_challenges had no owning module before).
+│   │   │                             # Also owns admin user-provisioning/management (NEW v1.4).
 │   │   ├── ledger/                  # Context 2: Merchant Sales & Stock
 │   │   │   ├── domain/              # Entities, Value Objects, Repository Interfaces
 │   │   │   ├── application/         # Use Cases, Command Handlers
@@ -177,14 +206,25 @@ CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     phone_number VARCHAR(20) UNIQUE NOT NULL,
     full_name VARCHAR(100) NOT NULL,
-    role VARCHAR(20) NOT NULL CHECK (role IN ('MERCHANT', 'CHAMA_MEMBER', 'UNDERWRITER')),
+    role VARCHAR(20) NOT NULL CHECK (role IN ('MERCHANT', 'CHAMA_MEMBER', 'UNDERWRITER', 'ADMIN')), -- ADMIN added v1.4
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP WITH TIME ZONE, -- soft delete: preserves ledger FK integrity and
                                           -- supports Data Protection Act erasure requests
                                           -- via PII redaction instead of row deletion
+    created_by UUID REFERENCES users(id) ON DELETE SET NULL, -- NEW v1.4: set when an admin provisions
+                                                                -- this account directly (UNDERWRITER/ADMIN
+                                                                -- onboarding); NULL for self-registered
+                                                                -- MERCHANT/CHAMA_MEMBER accounts
     CONSTRAINT chk_deleted_after_created CHECK (deleted_at IS NULL OR deleted_at >= created_at)
 );
 CREATE INDEX idx_users_active ON users(id) WHERE deleted_at IS NULL;
+
+-- NEW (v1.4): self-registration (the public OTP signup flow) only ever
+-- creates MERCHANT/CHAMA_MEMBER accounts -- enforced in the application
+-- layer (VerifyOtp), not by a DB constraint, since the DB has no notion of
+-- "who is calling" to distinguish self-signup from admin-provisioned
+-- creation. UNDERWRITER/ADMIN accounts are created exclusively via
+-- POST /admin/users (or scripts/create_admin.py for the very first admin).
 
 -- Backs the HttpOnly refresh-cookie flow described in §8. Rotation semantics
 -- (single-use, replaced on each refresh) are enforced at the application
@@ -291,6 +331,10 @@ CREATE TRIGGER trg_validate_ledger_chain
 -- INVENTORY (feeds the "Margin Stability" / turnover scoring features in §5)
 -- =====================================================================
 
+-- v1.5: a SALE against duka_transactions must reference at least one
+-- inventory_movements row here via a real, merchant-owned product_id --
+-- application-layer checks, not new columns/constraints (see §8).
+
 CREATE TABLE products (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
@@ -351,7 +395,10 @@ CREATE TABLE chama_members (
     chama_id UUID NOT NULL REFERENCES chama_groups(id) ON DELETE RESTRICT,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     member_role VARCHAR(20) NOT NULL DEFAULT 'MEMBER'
-        CHECK (member_role IN ('CHAIRPERSON', 'TREASURER', 'SECRETARY', 'MEMBER')),
+        CHECK (member_role IN ('CHAIRPERSON', 'TREASURER', 'SECRETARY', 'MEMBER')), -- the three non-MEMBER
+                                                                                     -- roles are who's allowed to
+                                                                                     -- record a contribution for
+                                                                                     -- someone else (v1.5, §8)
     joined_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (chama_id, user_id)
 );
@@ -848,3 +895,18 @@ This is a design constraint worth surfacing to stakeholders early, since it affe
    - **Idempotency-Key on money-handling writes:** `POST /ledger/transactions/{sale,expense,supplier-payment}` accept an optional `Idempotency-Key` header. The first successful call's response is stored in `idempotency_keys` keyed on `(user_id, idempotency_key, endpoint)`; a retried request with the same key returns the original response instead of re-running the write. This specifically protects against the flaky-mobile-connection case — a client that times out waiting for a response and retries must not create a second real ledger entry. No key supplied means no deduplication, matching how most HTTP clients that haven't opted in behave today. Two truly simultaneous requests with the same key can still both attempt the write; the `UNIQUE` constraint lets only one commit, and the loser's entire transaction (including its ledger write) rolls back rather than partially applying — the client sees an error and a retry converges to the single correct result. That residual case is rare enough (it requires millisecond-level concurrent duplicate submission, not just a sequential retry) not to warrant finer-grained locking unless observed in practice.
    - **Pagination:** see §4's pagination note — every list endpoint now takes `limit`/`offset` (default 50, max 200) and returns `{items, total, limit, offset}`.
    - **Concurrency on ledger `sequence_no`:** see §4's concurrency note — a Postgres advisory lock keyed on `merchant_id` is the recommended fix for the sequence-allocation race, tracked but not yet implemented.
+
+6. **Role Provisioning & Admin Management (NEW, v1.4):**
+   - **Self-registration is restricted to `MERCHANT`/`CHAMA_MEMBER`.** The public OTP signup flow rejects an attempt to self-assign `UNDERWRITER` or `ADMIN` (403) — those roles carry access to the applicant view and loan approval, and letting anyone self-select into them at signup was a straightforward privilege-escalation path, not a legitimate onboarding flow.
+   - **`UNDERWRITER`/`ADMIN` accounts are created exclusively by an existing admin**, via `POST /admin/users` (gated by `require_role("ADMIN")` at the router level, applied to the whole `/admin/*` prefix). The created account then logs in through the ordinary, unmodified OTP flow — since the phone number already has a role assigned, no role picker is ever shown and no invite/redemption step exists to build or secure.
+   - **The very first admin is bootstrapped out-of-band**, via `scripts/create_admin.py` run directly against the database by whoever operates the deployment — the same pattern as `scripts/generate_jwt_keys.py`. This is the one deliberate exception to "everything goes through the API": there is no admin yet to call `POST /admin/users` for the first one.
+   - **Admin actions available:** create a user (any role), list/filter users by role and active status (paginated), update a user's name or role, deactivate an account, reactivate it. There is no "reset password" action — this is OTP-only auth with no password to reset; deactivation (which also revokes all of that user's outstanding refresh tokens immediately) is the equivalent for "lock this account out now."
+   - **Every admin-created account records who created it** via `users.created_by`, giving a minimal audit trail for who onboarded a given underwriter or admin, without a separate audit-log table.
+   - **Deactivation actually blocks login** (a correctness fix that shipped alongside this feature): the OTP verify flow now checks for a deactivated *existing* account before falling through to the "not registered" branch, so a deactivated user can't be silently re-registered with a fresh name/role the next time they attempt to log in.
+
+7. **Anti-Gaming Controls on Scoring Inputs (NEW, v1.5):** the hash chain in §4 guarantees a ledger row can't be edited or deleted after the fact — it does not guarantee the row was ever real. These controls address that separate, more important problem for the sales/inventory and chama-punctuality inputs specifically:
+   - `POST /ledger/transactions/sale` requires at least one line item, rejecting revenue that isn't tied to any inventory movement (422 if omitted).
+   - Every line item's `product_id` (and every `POST /ledger/products/{id}/restock` target) must belong to the acting merchant (403 otherwise) — previously neither check existed, so a merchant could reference or restock another merchant's inventory.
+   - `POST /chama/contributions` requires the acting user to be a `CHAIRPERSON`/`TREASURER`/`SECRETARY` of that specific chama, and forbids recording a contribution for themselves — a plain member (or the member being credited) attesting to their own punctuality no longer works.
+   - `margin_stability` is windowed to the same rolling 30 days as `sales_velocity`, so a single fabricated burst decays instead of permanently distorting the feature.
+   - **Not addressed by any of the above:** the data is still entirely self-reported (no external payment-rail corroboration), the merchant still controls the timing of their own score evaluation, the `receivables_days` proxy (§5.1) remains gameable via a fabricated `customer_phone`, and there's no statistical anomaly detection surfaced to the underwriter. See the v1.5 revision notes at the top of this document for the full reasoning.
