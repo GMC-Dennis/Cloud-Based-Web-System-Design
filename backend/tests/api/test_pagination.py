@@ -5,12 +5,24 @@ async def _register_and_login(client, sent_otps, phone: str) -> str:
     return r.json()["access_token"]
 
 
+async def _create_and_stock_product(client, headers, quantity: int = 100) -> str:
+    create = await client.post("/ledger/products", json={"name": "Test Product", "unit_cost": "10", "unit_price": "20"}, headers=headers)
+    product_id = create.json()["id"]
+    await client.post(f"/ledger/products/{product_id}/restock", json={"quantity": quantity}, headers=headers)
+    return product_id
+
+
 async def test_transaction_list_pagination_slices_correctly(client, sent_otps):
     token = await _register_and_login(client, sent_otps, "+254744000111")
     headers = {"Authorization": f"Bearer {token}"}
+    product_id = await _create_and_stock_product(client, headers)
 
     for i in range(5):
-        r = await client.post("/ledger/transactions/sale", json={"amount": f"{10 + i}.00"}, headers=headers)
+        r = await client.post(
+            "/ledger/transactions/sale",
+            json={"amount": f"{10 + i}.00", "line_items": [{"product_id": product_id, "quantity": 1}]},
+            headers=headers,
+        )
         assert r.status_code == 200
 
     page1 = (await client.get("/ledger/transactions", params={"limit": 2, "offset": 0}, headers=headers)).json()
@@ -38,7 +50,10 @@ async def test_pagination_limit_is_capped(client, sent_otps):
 async def test_pagination_defaults_when_no_params_given(client, sent_otps):
     token = await _register_and_login(client, sent_otps, "+254744000333")
     headers = {"Authorization": f"Bearer {token}"}
-    await client.post("/ledger/transactions/sale", json={"amount": "10.00"}, headers=headers)
+    product_id = await _create_and_stock_product(client, headers)
+    await client.post(
+        "/ledger/transactions/sale", json={"amount": "10.00", "line_items": [{"product_id": product_id, "quantity": 1}]}, headers=headers
+    )
 
     r = await client.get("/ledger/transactions", headers=headers)
     body = r.json()
