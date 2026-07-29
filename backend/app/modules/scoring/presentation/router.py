@@ -10,6 +10,7 @@ from app.modules.scoring.application.exceptions import LoanNotFound
 from app.modules.scoring.application.use_cases import (
     ComputeMerchantFeatures,
     CreateLoan,
+    DetectAnomalyFlags,
     EvaluateMerchant,
     ListApplicants,
     ListLoanRepayments,
@@ -46,7 +47,8 @@ async def evaluate_merchant(
     compute_features = ComputeMerchantFeatures(
         SqlLedgerRepository(db), SqlProductRepository(db), SqlChamaMemberRepository(db), SqlChamaContributionRepository(db)
     )
-    score = await EvaluateMerchant(compute_features, engine, SqlCreditScoreRepository(db)).execute(user_id)
+    detect_anomalies = DetectAnomalyFlags(SqlLedgerRepository(db), SqlProductRepository(db))
+    score = await EvaluateMerchant(compute_features, engine, SqlCreditScoreRepository(db), detect_anomalies).execute(user_id)
     await db.commit()
     return CreditScoreOut(**score.__dict__)
 

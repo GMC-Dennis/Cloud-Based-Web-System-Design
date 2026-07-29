@@ -12,6 +12,7 @@ class CreditScore:
     risk_tier: str
     model_version: str
     shap_explanation: dict
+    anomaly_flags: list[str]
     evaluated_at: datetime
 
 
@@ -46,6 +47,7 @@ class ApplicantView:
     risk_tier: str
     recommended_limit: Decimal
     shap_explanation: dict
+    anomaly_flags: list[str]
     applicant_name: str | None
     applicant_phone: str | None
     status: str | None

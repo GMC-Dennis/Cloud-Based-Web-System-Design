@@ -12,9 +12,26 @@ const PAGE_SIZE = 50;
 const DEFAULT_INTEREST_RATE = "0.05";
 const MAX_INTEREST_RATE = 0.5; // 50% -- a sane ceiling, not the column's raw Decimal(5,4) limit.
 
+// Human-readable labels for the anomaly-flag heuristic (platform
+// cross-cutting spec §3.4d) -- a triage aid, not a fraud verdict.
+const ANOMALY_FLAG_LABELS: Record<string, string> = {
+  VOLUME_SPIKE_LAST_3_DAYS: "Most revenue is from the last 3 days",
+  IMPLAUSIBLY_SMOOTH_MARGIN: "Margin is suspiciously constant day to day",
+};
+
 function isValidInterestRate(value: string): boolean {
   const parsed = Number(value);
   return value !== "" && Number.isFinite(parsed) && parsed > 0 && parsed <= MAX_INTEREST_RATE;
+}
+
+function AnomalyFlagsBadge({ flags }: { flags: string[] }) {
+  if (!flags.length) return null;
+  const labels = flags.map((f) => ANOMALY_FLAG_LABELS[f] ?? f);
+  return (
+    <Badge tone="warning" title={`Triage flags (not a fraud verdict):\n${labels.join("\n")}`}>
+      ⚠ {flags.length} flag{flags.length > 1 ? "s" : ""}
+    </Badge>
+  );
 }
 
 function RepaymentHistory({ loanId }: { loanId: string }) {
@@ -89,6 +106,7 @@ export function ApplicantTable() {
             <Th>Tier</Th>
             <Th>Limit</Th>
             <Th>Status</Th>
+            <Th>Flags</Th>
             <Th>Disburse</Th>
           </Tr>
         </Thead>
@@ -105,6 +123,9 @@ export function ApplicantTable() {
                   </Td>
                   <Td>KES {a.recommended_limit}</Td>
                   <Td>{a.status ?? "No loan yet"}</Td>
+                  <Td>
+                    <AnomalyFlagsBadge flags={a.anomaly_flags} />
+                  </Td>
                   <Td>
                     {a.loan_id ? (
                       <Button size="sm" variant="secondary" onClick={() => setExpandedLoanId(expandedLoanId === a.loan_id ? null : a.loan_id)}>
@@ -147,7 +168,7 @@ export function ApplicantTable() {
                 </Tr>
                 {a.loan_id && expandedLoanId === a.loan_id && (
                   <Tr>
-                    <Td colSpan={6}>
+                    <Td colSpan={7}>
                       <LoanRepaymentSection loanId={a.loan_id} />
                     </Td>
                   </Tr>

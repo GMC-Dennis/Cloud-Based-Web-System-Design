@@ -1,3 +1,4 @@
+import statistics
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -9,6 +10,15 @@ from app.modules.scoring.domain.repository import CreditScoreRepository, LoanRep
 from app.modules.scoring.infrastructure.scoring_engine import AlternativeCreditScorer, MerchantFeatures
 
 FEATURE_WINDOW_DAYS = 30
+
+# Anomaly-flag heuristic thresholds (platform-cross-cutting spec §3.4d) --
+# a cheap triage signal, not a fraud model. Tuned to be conservative (few
+# false positives) rather than sensitive, since a wrongly-flagged merchant
+# has no way to contest it.
+ANOMALY_VOLUME_SPIKE_WINDOW_DAYS = 3
+ANOMALY_VOLUME_SPIKE_RATIO = 0.8
+ANOMALY_MARGIN_MIN_DAYS = 3
+ANOMALY_MARGIN_VARIANCE_THRESHOLD = 0.0005
 
 
 class ComputeMerchantFeatures:
@@ -55,15 +65,52 @@ class ComputeMerchantFeatures:
         )
 
 
+class DetectAnomalyFlags:
+    """Cheap heuristic triage signals computed alongside a score (platform
+    cross-cutting spec §3.4d) -- explicitly NOT a fraud model. Each flag is
+    a "worth a second look" signal, not a guarantee; frame it to
+    stakeholders the same way. Independent of ComputeMerchantFeatures on
+    purpose: these thresholds are tuned for anomaly triage, not for the
+    scoring model's feature scale, so reusing its aggregates would
+    conflate two different concerns."""
+
+    def __init__(self, ledger_repo: LedgerRepository, product_repo: ProductRepository):
+        self.ledger_repo = ledger_repo
+        self.product_repo = product_repo
+
+    async def execute(self, user_id: str) -> list[str]:
+        flags: list[str] = []
+        now = datetime.now(timezone.utc)
+
+        revenue_30d = await self.ledger_repo.sales_total_since(user_id, now - timedelta(days=FEATURE_WINDOW_DAYS))
+        revenue_recent = await self.ledger_repo.sales_total_since(user_id, now - timedelta(days=ANOMALY_VOLUME_SPIKE_WINDOW_DAYS))
+        if revenue_30d > 0 and (revenue_recent / revenue_30d) > Decimal(str(ANOMALY_VOLUME_SPIKE_RATIO)):
+            flags.append("VOLUME_SPIKE_LAST_3_DAYS")
+
+        daily_ratios = await self.product_repo.daily_margin_ratios(user_id, now - timedelta(days=FEATURE_WINDOW_DAYS))
+        if len(daily_ratios) >= ANOMALY_MARGIN_MIN_DAYS and statistics.pvariance(daily_ratios) < ANOMALY_MARGIN_VARIANCE_THRESHOLD:
+            flags.append("IMPLAUSIBLY_SMOOTH_MARGIN")
+
+        return flags
+
+
 class EvaluateMerchant:
-    def __init__(self, compute_features: ComputeMerchantFeatures, engine: AlternativeCreditScorer, score_repo: CreditScoreRepository):
+    def __init__(
+        self,
+        compute_features: ComputeMerchantFeatures,
+        engine: AlternativeCreditScorer,
+        score_repo: CreditScoreRepository,
+        detect_anomalies: DetectAnomalyFlags,
+    ):
         self.compute_features = compute_features
         self.engine = engine
         self.score_repo = score_repo
+        self.detect_anomalies = detect_anomalies
 
     async def execute(self, user_id: str) -> CreditScore:
         features = await self.compute_features.execute(user_id)
         credit_score, risk_tier, shap_dict = await self.engine.evaluate_merchant(user_id, features)
+        anomaly_flags = await self.detect_anomalies.execute(user_id)
 
         # Recommended limit: a conservative multiple of 30-day sales velocity,
         # scaled down for higher-risk tiers. Placeholder policy pending a real
@@ -78,6 +125,7 @@ class EvaluateMerchant:
             risk_tier=risk_tier,
             model_version=self.engine.model_version,
             shap_explanation=shap_dict,
+            anomaly_flags=anomaly_flags,
         )
 
 

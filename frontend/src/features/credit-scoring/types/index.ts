@@ -16,6 +16,10 @@ export interface Applicant {
   risk_tier: "LOW" | "MEDIUM" | "HIGH";
   recommended_limit: string;
   shap_explanation: Record<string, number>;
+  // Heuristic triage signal (e.g. "VOLUME_SPIKE_LAST_3_DAYS"), not a fraud
+  // model -- underwriter-facing only, deliberately absent from the
+  // merchant's own CreditScore type (see backend CreditScoreOut's comment).
+  anomaly_flags: string[];
   applicant_name: string | null;
   applicant_phone: string | null;
   status: string | null;

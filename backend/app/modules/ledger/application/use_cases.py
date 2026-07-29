@@ -28,6 +28,11 @@ class _AppendLedgerEntry:
     async def execute(
         self, *, merchant_id: str, amount: Decimal, currency: str, transaction_type: str, is_credit: bool, customer_phone: str | None
     ) -> DukaTransaction:
+        # Serializes concurrent appends for this merchant so two simultaneous
+        # requests can't both read the same "last" row before either commits
+        # (platform-cross-cutting spec §3.3) -- must happen before the read
+        # below, not just before the write, or the race window stays open.
+        await self.ledger_repo.acquire_merchant_lock(merchant_id)
         last = await self.ledger_repo.get_last_transaction(merchant_id)
         sequence_no = (last.sequence_no + 1) if last else 1
         previous_hash = last.record_hash if last else GENESIS_HASH

@@ -5,6 +5,10 @@ from pydantic import BaseModel
 
 
 class CreditScoreOut(BaseModel):
+    # anomaly_flags is deliberately NOT exposed here: this schema backs the
+    # merchant's own self-view/evaluate endpoints, and showing a merchant
+    # exactly which heuristic tripped would teach them how to evade it. It's
+    # only surfaced via ApplicantOut, the underwriter-facing schema below.
     id: str
     user_id: str
     credit_score: int
@@ -63,6 +67,7 @@ class ApplicantOut(BaseModel):
     risk_tier: str
     recommended_limit: Decimal
     shap_explanation: dict[str, float]
+    anomaly_flags: list[str]
     applicant_name: str | None
     applicant_phone: str | None
     status: str | None

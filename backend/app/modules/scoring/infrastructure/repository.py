@@ -14,7 +14,8 @@ from app.modules.scoring.infrastructure.models import LoanRepayment as Repayment
 def _to_score(row: CreditScoreModel) -> CreditScore:
     return CreditScore(
         id=str(row.id), user_id=str(row.user_id), credit_score=row.credit_score, recommended_limit=row.recommended_limit,
-        risk_tier=row.risk_tier, model_version=row.model_version, shap_explanation=row.shap_explanation, evaluated_at=row.evaluated_at,
+        risk_tier=row.risk_tier, model_version=row.model_version, shap_explanation=row.shap_explanation,
+        anomaly_flags=row.anomaly_flags, evaluated_at=row.evaluated_at,
     )
 
 
@@ -31,11 +32,19 @@ class SqlCreditScoreRepository:
         self.session = session
 
     async def save(
-        self, *, user_id: str, credit_score: int, recommended_limit: Decimal, risk_tier: str, model_version: str, shap_explanation: dict
+        self,
+        *,
+        user_id: str,
+        credit_score: int,
+        recommended_limit: Decimal,
+        risk_tier: str,
+        model_version: str,
+        shap_explanation: dict,
+        anomaly_flags: list[str],
     ) -> CreditScore:
         row = CreditScoreModel(
             user_id=uuid.UUID(user_id), credit_score=credit_score, recommended_limit=recommended_limit,
-            risk_tier=risk_tier, model_version=model_version, shap_explanation=shap_explanation,
+            risk_tier=risk_tier, model_version=model_version, shap_explanation=shap_explanation, anomaly_flags=anomaly_flags,
         )
         self.session.add(row)
         await self.session.flush()
@@ -141,6 +150,7 @@ class SqlLoanRepository:
                 risk_tier=r.risk_tier,
                 recommended_limit=r.recommended_limit,
                 shap_explanation=r.shap_explanation,
+                anomaly_flags=r.anomaly_flags,
                 applicant_name=r.applicant_name,
                 applicant_phone=r.applicant_phone,
                 status=r.status,

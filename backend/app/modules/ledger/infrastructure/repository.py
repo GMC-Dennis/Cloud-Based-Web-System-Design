@@ -44,6 +44,9 @@ class SqlLedgerRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    async def acquire_merchant_lock(self, merchant_id: str) -> None:
+        await self.session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:merchant_id))"), {"merchant_id": merchant_id})
+
     async def get_last_transaction(self, merchant_id: str) -> DukaTransaction | None:
         row = (
             await self.session.execute(
@@ -211,6 +214,24 @@ class SqlProductRepository:
         if not revenue:
             return 0.0
         return float(gross_profit) / float(revenue)
+
+    async def daily_margin_ratios(self, merchant_id: str, since: datetime) -> list[float]:
+        result = await self.session.execute(
+            text(
+                """
+                SELECT
+                    SUM((p.unit_price - p.unit_cost) * ABS(im.quantity_delta)) AS gross_profit,
+                    SUM(p.unit_price * ABS(im.quantity_delta)) AS revenue
+                FROM inventory_movements im
+                JOIN products p ON p.id = im.product_id
+                WHERE p.merchant_id = :merchant_id AND im.quantity_delta < 0 AND im.created_at >= :since
+                GROUP BY DATE(im.created_at)
+                HAVING SUM(p.unit_price * ABS(im.quantity_delta)) > 0
+                """
+            ),
+            {"merchant_id": merchant_id, "since": since},
+        )
+        return [float(row.gross_profit) / float(row.revenue) for row in result]
 
 
 class SqlInventoryRepository:

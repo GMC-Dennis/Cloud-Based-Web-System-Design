@@ -6,6 +6,14 @@ from app.modules.ledger.domain.entities import DukaTransaction, InventoryMovemen
 
 
 class LedgerRepository(Protocol):
+    async def acquire_merchant_lock(self, merchant_id: str) -> None:
+        """Postgres advisory transaction lock keyed on merchant_id -- serializes
+        concurrent duka_transactions appends for the *same* merchant so two
+        simultaneous requests can't both read the same "last sequence_no"
+        before either commits. Auto-releases at transaction end (commit or
+        rollback); no explicit unlock needed. Different merchants are
+        unaffected -- see _AppendLedgerEntry for why this is called first."""
+        ...
     async def get_last_transaction(self, merchant_id: str) -> DukaTransaction | None: ...
     async def append(
         self,
@@ -32,6 +40,12 @@ class ProductRepository(Protocol):
     async def get(self, product_id: str) -> Product | None: ...
     async def list_for_merchant(self, merchant_id: str, limit: int, offset: int) -> tuple[list[Product], int]: ...
     async def margin_stability(self, merchant_id: str, since: datetime) -> float: ...
+    async def daily_margin_ratios(self, merchant_id: str, since: datetime) -> list[float]:
+        """Per-day gross_profit/revenue ratio across days with at least one
+        sale movement in the window -- used only for the anomaly-flag
+        heuristic (platform-cross-cutting spec §3.4d, "implausibly smooth
+        margin"), not fed into the scoring model like margin_stability is."""
+        ...
 
 
 class InventoryRepository(Protocol):

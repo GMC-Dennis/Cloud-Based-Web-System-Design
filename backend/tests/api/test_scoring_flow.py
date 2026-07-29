@@ -33,7 +33,8 @@ async def test_underwriter_can_create_algorithmic_loan_without_knowing_borrower_
     underwriter_token, _ = await _provision_underwriter_and_login(client, sent_otps, db_session, "+254722000222", "Uma Underwriter")
 
     score = await SqlCreditScoreRepository(db_session).save(
-        user_id=merchant_user_id, credit_score=750, recommended_limit=Decimal("20000"), risk_tier="LOW", model_version="rf_v3_2026_06", shap_explanation={}
+        user_id=merchant_user_id, credit_score=750, recommended_limit=Decimal("20000"), risk_tier="LOW", model_version="rf_v3_2026_06",
+        shap_explanation={}, anomaly_flags=[],
     )
     await db_session.commit()
 
@@ -63,7 +64,8 @@ async def test_borrower_can_view_their_own_loan_repayments(client, sent_otps, db
     underwriter_token, _ = await _provision_underwriter_and_login(client, sent_otps, db_session, "+254722000666", "Uma Four")
 
     score = await SqlCreditScoreRepository(db_session).save(
-        user_id=merchant_user_id, credit_score=750, recommended_limit=Decimal("20000"), risk_tier="LOW", model_version="rf_v3_2026_06", shap_explanation={}
+        user_id=merchant_user_id, credit_score=750, recommended_limit=Decimal("20000"), risk_tier="LOW", model_version="rf_v3_2026_06",
+        shap_explanation={}, anomaly_flags=[],
     )
     await db_session.commit()
 
@@ -96,7 +98,8 @@ async def test_borrower_cannot_view_another_borrowers_loan_repayments(client, se
     underwriter_token, _ = await _provision_underwriter_and_login(client, sent_otps, db_session, "+254722000999", "Uma Five")
 
     score = await SqlCreditScoreRepository(db_session).save(
-        user_id=merchant_user_id, credit_score=750, recommended_limit=Decimal("20000"), risk_tier="LOW", model_version="rf_v3_2026_06", shap_explanation={}
+        user_id=merchant_user_id, credit_score=750, recommended_limit=Decimal("20000"), risk_tier="LOW", model_version="rf_v3_2026_06",
+        shap_explanation={}, anomaly_flags=[],
     )
     await db_session.commit()
 

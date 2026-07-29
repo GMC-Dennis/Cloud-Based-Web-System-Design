@@ -20,6 +20,7 @@ class CreditScore(Base):
     risk_tier: Mapped[str] = mapped_column(String(20), nullable=False)
     model_version: Mapped[str] = mapped_column(String(30), nullable=False)
     shap_explanation: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    anomaly_flags: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
     evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.current_timestamp())
 
 

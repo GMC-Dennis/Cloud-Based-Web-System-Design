@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import get_redis
 from app.core.db import get_db
-from app.core.deps import CurrentUser, get_current_user
+from app.core.deps import CurrentUser, get_current_user, require_role
 from app.core.idempotency import idempotent
 from app.core.pagination import Page, PageParams
 from app.modules.ledger.application.exceptions import ProductNotOwnedByMerchant, SaleRequiresLineItems
@@ -32,7 +32,7 @@ from app.modules.ledger.presentation.schemas import (
     TransactionOut,
 )
 
-router = APIRouter(prefix="/ledger", tags=["ledger"])
+router = APIRouter(prefix="/ledger", tags=["ledger"], dependencies=[Depends(require_role("MERCHANT"))])
 
 
 @router.post("/transactions/sale", response_model=TransactionOut)

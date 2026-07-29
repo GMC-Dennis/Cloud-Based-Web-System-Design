@@ -24,7 +24,8 @@ async def test_manual_loan_without_override_reason_rejected_at_application_layer
 
 async def test_algorithmic_loan_with_valid_score_succeeds(db_session, test_user):
     score = await SqlCreditScoreRepository(db_session).save(
-        user_id=test_user.id, credit_score=700, recommended_limit=Decimal("10000"), risk_tier="MEDIUM", model_version="rf_v3_2026_06", shap_explanation={}
+        user_id=test_user.id, credit_score=700, recommended_limit=Decimal("10000"), risk_tier="MEDIUM", model_version="rf_v3_2026_06",
+        shap_explanation={}, anomaly_flags=[],
     )
     await db_session.flush()
 

@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.cache import get_redis
 from app.core.db import get_db
-from app.core.deps import CurrentUser, get_current_user
+from app.core.deps import CurrentUser, get_current_user, require_role
 from app.core.pagination import Page, PageParams
 from app.modules.chama.application.exceptions import (
     CannotRecordOwnContribution,
@@ -41,7 +41,7 @@ from app.modules.chama.presentation.schemas import (
     SchedulePayoutIn,
 )
 
-router = APIRouter(prefix="/chama", tags=["chama"])
+router = APIRouter(prefix="/chama", tags=["chama"], dependencies=[Depends(require_role("MERCHANT", "CHAMA_MEMBER"))])
 
 
 @router.post("/groups", response_model=ChamaGroupOut)

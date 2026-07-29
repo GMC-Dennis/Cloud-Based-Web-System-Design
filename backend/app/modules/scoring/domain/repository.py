@@ -7,7 +7,15 @@ from app.modules.scoring.domain.entities import ApplicantView, CreditScore, Loan
 
 class CreditScoreRepository(Protocol):
     async def save(
-        self, *, user_id: str, credit_score: int, recommended_limit: Decimal, risk_tier: str, model_version: str, shap_explanation: dict
+        self,
+        *,
+        user_id: str,
+        credit_score: int,
+        recommended_limit: Decimal,
+        risk_tier: str,
+        model_version: str,
+        shap_explanation: dict,
+        anomaly_flags: list[str],
     ) -> CreditScore: ...
     async def get(self, credit_score_id: str) -> CreditScore | None: ...
     async def latest_for_user(self, user_id: str) -> CreditScore | None: ...
